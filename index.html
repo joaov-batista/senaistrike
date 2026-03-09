@@ -94,6 +94,30 @@
       font-size: 2rem; font-weight: bold; text-transform: uppercase; text-shadow: 2px 2px 5px #000;
     }
 
+    /* CHAT DO JOGO */
+    #chatContainer {
+      position: absolute; left: 26px; top: 100px; z-index: 100;
+      display: none; flex-direction: column; width: 320px;
+      pointer-events: none; /* Deixa os cliques passarem pro jogo, exceto no input */
+    }
+    #chatMessages {
+      height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
+      padding-bottom: 10px;
+      scrollbar-width: thin; scrollbar-color: #ff4655 transparent;
+    }
+    .chat-msg {
+      background: rgba(0, 0, 0, 0.6); padding: 6px 10px; border-radius: 6px;
+      font-size: 1rem; color: #eee; font-weight: bold; word-wrap: break-word;
+      border-left: 3px solid #00ffcc;
+    }
+    .chat-msg span.name { color: #00ffcc; margin-right: 5px; }
+    #chatInput {
+      pointer-events: auto; /* Permite clicar e digitar */
+      background: rgba(0, 0, 0, 0.8); border: 2px solid #ff4655;
+      color: #fff; padding: 10px; border-radius: 8px; font-family: 'Rajdhani';
+      font-size: 1rem; outline: none; display: none;
+    }
+
     #spectatorHUD {
       position: absolute; top: 18px; left: 18px; z-index: 120;
       display: none; padding: 12px 16px; border-radius: 10px;
@@ -199,11 +223,6 @@
     }
     .tag-host { color: #ffd166; }
     .tag-ready { color: #2ecc71; }
-
-    @media (max-width: 1100px) {
-      #lobby h1, #preLobby h1 { font-size: 3.5rem; }
-      .subtitle { font-size: 1rem; }
-    }
   </style>
 
   <script type="importmap">
@@ -229,6 +248,11 @@
 
   <div id="waveHUD">ONDA <span id="waveNumber">1</span> - Zumbis: <span id="zombieCount">0</span></div>
 
+  <div id="chatContainer">
+    <div id="chatMessages"></div>
+    <input type="text" id="chatInput" placeholder="Aperte ENTER para enviar..." maxlength="60" autocomplete="off" />
+  </div>
+
   <div id="spectatorHUD">
     <div>ESPECTANDO</div>
     <div id="spectatorName" style="font-size:1.2rem;color:#00ffcc">---</div>
@@ -244,7 +268,7 @@
         <span class="armor-text">ARMOR: <span id="armorValue">0</span></span>
       </div>
       <div id="abilityInfo">[E] Habilidade Pronta</div>
-      <div id="flashlightHint" style="margin-top:8px;color:#ffd166;font-weight:bold;display:none;">[F] Lanterna</div>
+      <div id="flashlightHint" style="margin-top:8px;color:#ffd166;font-weight:bold;display:none;">[F] Lanterna / [ENTER] Chat</div>
     </div>
   </div>
 
@@ -259,7 +283,7 @@
     <h2>SENAISTRIKE</h2>
     <p style="font-size:1.35rem;margin:0;">Clique na tela para continuar.</p>
     <p style="margin-top:18px;padding:10px 18px;border-radius:10px;background:rgba(255,255,255,.08);color:#aaa;font-size:1.05rem;">
-      [W,A,S,D] Andar | [Shift] Correr | [Espaço] Pular | [Q] Agachar | [Scroll] Armas | [R] Recarregar | [E] Poder | [F] Lanterna
+      [W,A,S,D] Andar | [Shift] Correr | [Espaço] Pular | [Q] Agachar | [Scroll] Armas | [R] Recarregar | [E] Poder | [F] Lanterna | [ENTER] Chat
     </p>
   </div>
 
@@ -390,6 +414,7 @@
     let scene, camera, renderer, controls;
     let prevTime = performance.now();
 
+    // VETORES PRÉ-ALOCADOS (Otimização para parar de gerar lixo no animate)
     const _moveVec = new THREE.Vector3();
     const _forwardVec = new THREE.Vector3();
     const _rightVec = new THREE.Vector3();
@@ -446,19 +471,46 @@
     let spectateTargets = [];
     let spectateIndex = 0;
 
-    let localEffects = { crouchDamageMult: 1.35, joaoShieldUntil: 0, joaoBuffUntil: 0, joaoOneShotKnifeUntil: 0, joaoHpExpireApplied: false, brisaUntil: 0, leoInvisibleUntil: 0, leoBlindUntil: 0, taianaInvisibleUntil: 0, taianaDroneUntil: 0, taianaXrayUntil: 0, gabrielaSafeUntil: 0, gabrielaTotemId: null, rafaelRocketReady: false, rafaelRocketUntil: 0 };
+    let localEffects = {
+      crouchDamageMult: 1.35,
+      joaoShieldUntil: 0,
+      joaoBuffUntil: 0,
+      joaoOneShotKnifeUntil: 0,
+      joaoHpExpireApplied: false,
+      brisaUntil: 0,
+      leoInvisibleUntil: 0,
+      leoBlindUntil: 0,
+      taianaInvisibleUntil: 0,
+      taianaDroneUntil: 0,
+      taianaXrayUntil: 0,
+      gabrielaSafeUntil: 0,
+      gabrielaTotemId: null,
+      rafaelRocketReady: false,
+      rafaelRocketUntil: 0
+    };
+
     let worldSeed = 0;
     let worldSnapshot = null;
     let localHealTotems = [];
     const textureLoader = new THREE.TextureLoader();
 
-    const ui = { lobby: document.getElementById('lobby'), preLobby: document.getElementById('preLobby'), preLobbyPlayers: document.getElementById('preLobbyPlayers'), preRoomCode: document.getElementById('preRoomCode'), startMatchBtn: document.getElementById('startMatchBtn') };
+    const ui = {
+      lobby: document.getElementById('lobby'),
+      preLobby: document.getElementById('preLobby'),
+      preLobbyPlayers: document.getElementById('preLobbyPlayers'),
+      preRoomCode: document.getElementById('preRoomCode'),
+      startMatchBtn: document.getElementById('startMatchBtn')
+    };
 
+    // FUNÇÕES DE LIXEIRO DA PLACA DE VÍDEO (Evita travamentos do host por vazamento de memória)
     function removeAndDispose(obj) {
       if (!obj) return;
       if (scene) scene.remove(obj);
       if (obj.geometry) obj.geometry.dispose();
-      if (obj.material) { if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose()); else obj.material.dispose(); }
+      if (obj.material) {
+        if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+        else obj.material.dispose();
+      }
       if (obj.children) obj.children.forEach(c => removeAndDispose(c));
     }
 
@@ -469,25 +521,38 @@
     function randomSeed(seed) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296); }
     function distance2D(a, b) { const dx = a.x - b.x, dz = a.z - b.z; return Math.sqrt(dx * dx + dz * dz); }
 
-    function loadTextureSafe(fileName) { return textureLoader.load(fileName, undefined, undefined, () => {}); }
+    function loadTextureSafe(fileName) {
+      return textureLoader.load(fileName, undefined, undefined, () => {});
+    }
 
     function createGridTexture(color1, color2, repX = 20, repY = 20) {
-      const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 512; const ctx = canvas.getContext('2d');
-      ctx.fillStyle = color1; ctx.fillRect(0, 0, 512, 512); ctx.strokeStyle = color2; ctx.lineWidth = 4;
-      for (let i = 0; i <= 512; i += 64) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke(); }
-      const tex = new THREE.CanvasTexture(canvas); tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(repX, repY);
+      const canvas = document.createElement('canvas');
+      canvas.width = 512; canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = color1; ctx.fillRect(0, 0, 512, 512);
+      ctx.strokeStyle = color2; ctx.lineWidth = 4;
+      for (let i = 0; i <= 512; i += 64) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke();
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(repX, repY);
       return tex;
     }
 
     function getPlayerPosition() { return controls ? controls.getObject().position : new THREE.Vector3(); }
-    function getPlayerBoxAt(pos) { return new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(pos.x, pos.y, pos.z), new THREE.Vector3(PLAYER_RADIUS * 2, PLAYER_HEIGHT, PLAYER_RADIUS * 2)); }
+    function getPlayerBoxAt(pos) {
+      return new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(pos.x, pos.y, pos.z), new THREE.Vector3(PLAYER_RADIUS * 2, PLAYER_HEIGHT, PLAYER_RADIUS * 2));
+    }
     function getColliderBox(mesh) { return new THREE.Box3().setFromObject(mesh); }
     function addMapObject(mesh, solid = true) { mapObjects.push(mesh); if (solid) colliders.push(mesh); scene.add(mesh); }
     function removeMapObject(mesh) { removeAndDispose(mesh); mapObjects = mapObjects.filter(m => m !== mesh); colliders = colliders.filter(m => m !== mesh); }
     
     function keepPlayerInsideArena() {
-      const limit = isZombieMode ? 285 : 255; const pos = getPlayerPosition();
-      pos.x = clamp(pos.x, -limit, limit); pos.z = clamp(pos.z, -limit, limit);
+      const limit = isZombieMode ? 285 : 255;
+      const pos = getPlayerPosition();
+      pos.x = clamp(pos.x, -limit, limit);
+      pos.z = clamp(pos.z, -limit, limit);
     }
 
     function collidesAtPosition(testPos) {
@@ -504,20 +569,26 @@
 
     function tryMoveAxisWithStep(axis, amount) {
       if (amount === 0) return;
-      const pos = getPlayerPosition(); const original = pos.clone(); pos[axis] += amount;
+      const pos = getPlayerPosition();
+      const original = pos.clone();
+      pos[axis] += amount;
       const hit = collidesAtPosition(pos);
       if (!hit) return;
-      const obstacleBox = getColliderBox(hit); const obstacleTop = obstacleBox.max.y; const feetY = pos.y - PLAYER_HALF_HEIGHT;
+      const obstacleBox = getColliderBox(hit);
+      const obstacleTop = obstacleBox.max.y;
+      const feetY = pos.y - PLAYER_HALF_HEIGHT;
       const canStep = obstacleTop >= feetY - 0.2 && obstacleTop <= feetY + STEP_HEIGHT;
       if (canStep) {
-        const stepped = pos.clone(); stepped.y = obstacleTop + PLAYER_HALF_HEIGHT + 0.05;
+        const stepped = pos.clone();
+        stepped.y = obstacleTop + PLAYER_HALF_HEIGHT + 0.05;
         if (canStandAtPosition(stepped)) { pos.copy(stepped); canJump = true; velocity.y = 0; return; }
       }
       pos.copy(original); velocity[axis] = 0;
     }
 
     function showHitOverlay() {
-      const hit = document.getElementById('hitOverlay'); hit.style.opacity = '1'; setTimeout(() => hit.style.opacity = '0', 120);
+      const hit = document.getElementById('hitOverlay');
+      hit.style.opacity = '1'; setTimeout(() => hit.style.opacity = '0', 120);
     }
 
     function makeHealthBar(width = 10, y = 16) {
@@ -531,25 +602,36 @@
 
     function updateHealthBar(bar, hp, maxHp) {
       if (!bar) return;
-      const ratio = clamp(hp / maxHp, 0, 1); const fg = bar.userData.fg;
-      fg.scale.x = Math.max(0.001, ratio); fg.position.x = -(bar.userData.baseWidth * (1 - ratio)) / 2;
-      if (ratio > 0.6) fg.material.color.set(0x2ecc71); else if (ratio > 0.3) fg.material.color.set(0xf1c40f); else fg.material.color.set(0xe74c3c);
+      const ratio = clamp(hp / maxHp, 0, 1);
+      const fg = bar.userData.fg;
+      fg.scale.x = Math.max(0.001, ratio);
+      fg.position.x = -(bar.userData.baseWidth * (1 - ratio)) / 2;
+      if (ratio > 0.6) fg.material.color.set(0x2ecc71);
+      else if (ratio > 0.3) fg.material.color.set(0xf1c40f);
+      else fg.material.color.set(0xe74c3c);
     }
 
     function isHealthBarVisible(worldPos) {
       if (!camera) return false;
-      const camPos = camera.getWorldPosition(new THREE.Vector3()); const dist = camPos.distanceTo(worldPos);
+      const camPos = camera.getWorldPosition(new THREE.Vector3());
+      const dist = camPos.distanceTo(worldPos);
       if (dist > 85) return false;
-      const dir = worldPos.clone().sub(camPos).normalize(); const ray = new THREE.Raycaster(camPos, dir, 0.5, dist - 1);
-      const hits = ray.intersectObjects(colliders, true); return hits.length === 0;
+      const dir = worldPos.clone().sub(camPos).normalize();
+      const ray = new THREE.Raycaster(camPos, dir, 0.5, dist - 1);
+      const hits = ray.intersectObjects(colliders, true);
+      return hits.length === 0;
     }
 
-    function updateBarVisibility(bar, ownerPos) { if (!bar) return; bar.visible = isHealthBarVisible(ownerPos.clone().add(new THREE.Vector3(0, 10, 0))); }
+    function updateBarVisibility(bar, ownerPos) {
+      if (!bar) return;
+      bar.visible = isHealthBarVisible(ownerPos.clone().add(new THREE.Vector3(0, 10, 0)));
+    }
 
     function pulseDamageMesh(pos, color = 0xff4655, size = 6) {
       const ring = new THREE.Mesh(new THREE.RingGeometry(size * 0.65, size, 24), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
       ring.position.copy(pos); ring.lookAt(camera.position); scene.add(ring);
-      let t = 0; const int = setInterval(() => {
+      let t = 0;
+      const int = setInterval(() => {
         t += 0.08; ring.scale.setScalar(1 + t); ring.material.opacity = Math.max(0, 0.8 - t);
         if (t >= 0.9) { clearInterval(int); removeAndDispose(ring); }
       }, 16);
@@ -559,14 +641,23 @@
 
     function registerRoomPlayer(id, data) {
       if (!id || !data) return;
-      roomPlayers[id] = { id, nickname: data.nickname, charId: data.charId, team: data.team, ready: true, host: !!data.host || (isHost && id === localPlayerId) };
+      roomPlayers[id] = {
+        id,
+        nickname: data.nickname,
+        charId: data.charId,
+        team: data.team,
+        ready: true,
+        host: !!data.host || (isHost && id === localPlayerId)
+      };
       renderPreLobbyPlayers();
     }
 
     function renderPreLobbyPlayers() {
       ui.preLobbyPlayers.innerHTML = '';
       Object.values(roomPlayers).forEach(p => {
-        const el = document.createElement('div'); el.className = 'pre-player'; const ch = charById(p.charId);
+        const el = document.createElement('div');
+        el.className = 'pre-player';
+        const ch = charById(p.charId);
         el.innerHTML = `<div><strong>${p.nickname}</strong> ${p.host ? '<span class="tag-host">(HOST)</span>' : ''}<br><span style="color:#9ad">${ch?.name || 'Agente'}${isTeamMode ? ' - ' + (p.team === 'alpha' ? 'Alpha' : 'Omega') : ''}</span></div><div class="tag-ready">PRONTO</div>`;
         ui.preLobbyPlayers.appendChild(el);
       });
@@ -575,92 +666,218 @@
 
     function generateWorldSnapshot() {
       const rand = randomSeed(worldSeed);
-      const snapshot = { seed: worldSeed, mode: gameMode, isZombieMode, isTeamMode, arenaObstacles: [], forestRocks: [], forestTrees: [], items: [], spawnPoints: [] };
+      const snapshot = {
+        seed: worldSeed,
+        mode: gameMode,
+        isZombieMode,
+        isTeamMode,
+        arenaObstacles: [],
+        forestRocks: [],
+        forestTrees: [],
+        items: [],
+        spawnPoints: []
+      };
+
       if (!isZombieMode) {
         snapshot.arenaObstacles.push({ kind: 'box', w: 40, h: 10, d: 40, x: 0, y: 5, z: 0 });
         for (let i = 0; i < 26; i++) {
-          const w = 18 + rand() * 28; const h = 10 + rand() * 20; const d = 18 + rand() * 28; const x = (rand() - 0.5) * 400; const z = (rand() - 0.5) * 400;
+          const w = 18 + rand() * 28;
+          const h = 10 + rand() * 20;
+          const d = 18 + rand() * 28;
+          const x = (rand() - 0.5) * 400;
+          const z = (rand() - 0.5) * 400;
           if (Math.abs(x) < 40 && Math.abs(z) < 40) continue;
           snapshot.arenaObstacles.push({ kind: 'box', w, h, d, x, y: h / 2, z });
         }
       } else {
-        for (let i = 0; i < 22; i++) { const w = 14 + rand() * 24; const h = 6 + rand() * 10; const d = 14 + rand() * 24; snapshot.forestRocks.push({ w, h, d, x: (rand() - 0.5) * 460, y: h / 2, z: (rand() - 0.5) * 460 }); }
-        for (let i = 0; i < 80; i++) { const x = (rand() - 0.5) * 500; const z = (rand() - 0.5) * 500; if (Math.abs(x) < 40 && Math.abs(z) < 40) continue; snapshot.forestTrees.push({ x, z }); }
+        for (let i = 0; i < 22; i++) {
+          const w = 14 + rand() * 24;
+          const h = 6 + rand() * 10;
+          const d = 14 + rand() * 24;
+          snapshot.forestRocks.push({ w, h, d, x: (rand() - 0.5) * 460, y: h / 2, z: (rand() - 0.5) * 460 });
+        }
+        for (let i = 0; i < 80; i++) {
+          const x = (rand() - 0.5) * 500;
+          const z = (rand() - 0.5) * 500;
+          if (Math.abs(x) < 40 && Math.abs(z) < 40) continue;
+          snapshot.forestTrees.push({ x, z });
+        }
       }
-      const mapS = isZombieMode ? 480 : 450; const itemTypes = ['ammo','cura','granada','weapon']; const weaponTypes = ['pistola','shotgun','fuzil','sniper','minigun']; const itemCount = isZombieMode ? 80 : 48;
+
+      const mapS = isZombieMode ? 480 : 450;
+      const itemTypes = ['ammo','cura','granada','weapon'];
+      const weaponTypes = ['pistola','shotgun','fuzil','sniper','minigun'];
+      const itemCount = isZombieMode ? 80 : 48;
       for (let i = 0; i < itemCount; i++) {
-        const type = itemTypes[Math.floor(rand() * itemTypes.length)]; const x = (rand() - 0.5) * mapS; const z = (rand() - 0.5) * mapS; const data = { id: `itm_${i}`, type, x, y: 3, z };
-        if (type === 'ammo') data.amount = 30; if (type === 'cura') data.amount = 50; if (type === 'granada') data.amount = 1; if (type === 'weapon') data.weaponId = weaponTypes[Math.floor(rand() * weaponTypes.length)];
+        const type = itemTypes[Math.floor(rand() * itemTypes.length)];
+        const x = (rand() - 0.5) * mapS;
+        const z = (rand() - 0.5) * mapS;
+        const data = { id: `itm_${i}`, type, x, y: 3, z };
+        if (type === 'ammo') data.amount = 30;
+        if (type === 'cura') data.amount = 50;
+        if (type === 'granada') data.amount = 1;
+        if (type === 'weapon') data.weaponId = weaponTypes[Math.floor(rand() * weaponTypes.length)];
         snapshot.items.push(data);
       }
-      const spCount = isZombieMode ? 12 : 14; for (let i = 0; i < spCount; i++) snapshot.spawnPoints.push({ x: (rand() - 0.5) * 360, y: FLOOR_Y, z: (rand() - 0.5) * 360 });
+
+      const spCount = isZombieMode ? 12 : 14;
+      for (let i = 0; i < spCount; i++) snapshot.spawnPoints.push({ x: (rand() - 0.5) * 360, y: FLOOR_Y, z: (rand() - 0.5) * 360 });
       return snapshot;
     }
 
     function resolveSafeSpawn(basePos) {
-      const origin = new THREE.Vector3(basePos.x, FLOOR_Y, basePos.z); if (!collidesAtPosition(origin)) return origin;
-      for (let r = 1; r <= 20; r++) { const radius = r * 12; for (let i = 0; i < 20; i++) { const angle = (Math.PI * 2 * i) / 20; const candidate = new THREE.Vector3(origin.x + Math.cos(angle) * radius, FLOOR_Y, origin.z + Math.sin(angle) * radius); if (!collidesAtPosition(candidate)) return candidate; } }
+      const origin = new THREE.Vector3(basePos.x, FLOOR_Y, basePos.z);
+      if (!collidesAtPosition(origin)) return origin;
+      for (let r = 1; r <= 20; r++) {
+        const radius = r * 12;
+        for (let i = 0; i < 20; i++) {
+          const angle = (Math.PI * 2 * i) / 20;
+          const candidate = new THREE.Vector3(origin.x + Math.cos(angle) * radius, FLOOR_Y, origin.z + Math.sin(angle) * radius);
+          if (!collidesAtPosition(candidate)) return candidate;
+        }
+      }
       return new THREE.Vector3(0, FLOOR_Y, 80);
     }
 
     function chooseSpawnForPlayer(playerId) {
       if (!worldSnapshot || worldSnapshot.spawnPoints.length === 0) return new THREE.Vector3(0, FLOOR_Y, 80);
-      let hash = 0; const str = String(playerId || localPlayerId || '0'); for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
-      return resolveSafeSpawn(new THREE.Vector3(worldSnapshot.spawnPoints[hash % worldSnapshot.spawnPoints.length].x, worldSnapshot.spawnPoints[hash % worldSnapshot.spawnPoints.length].y, worldSnapshot.spawnPoints[hash % worldSnapshot.spawnPoints.length].z));
+      let hash = 0;
+      const str = String(playerId || localPlayerId || '0');
+      for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+      const s = worldSnapshot.spawnPoints[hash % worldSnapshot.spawnPoints.length];
+      return resolveSafeSpawn(new THREE.Vector3(s.x, s.y, s.z));
     }
 
+    // --- LÓGICA DO LOBBY ---
     function setupLobby() {
-      document.getElementById('gameMode').addEventListener('change', (e) => { gameMode = e.target.value; isZombieMode = gameMode.includes('zombie'); isTeamMode = gameMode.includes('tvt'); document.getElementById('roomCodeGroup').style.display = gameMode.includes('join') ? 'flex' : 'none'; document.getElementById('teamGroup').style.display = isTeamMode ? 'flex' : 'none'; checkLobbyReady(); });
-      document.getElementById('playerName').addEventListener('input', checkLobbyReady); document.getElementById('roomCode').addEventListener('input', checkLobbyReady);
-      CHARACTERS.forEach(char => {
-        const btn = document.createElement('div'); btn.className = 'item-btn'; btn.innerText = char.name;
-        btn.onclick = () => { document.querySelectorAll('#charList .item-btn').forEach(b => b.classList.remove('selected')); btn.classList.add('selected'); selectedCharId = char.id; const img = document.getElementById('previewImg'); img.src = char.img; img.style.display = 'block'; img.onerror = () => { img.onerror = null; img.style.display = 'none'; }; safeSetText('previewName', char.name); safeSetText('previewPower', char.ability); safeSetText('previewDesc', char.desc); checkLobbyReady(); };
-        document.getElementById('charList').appendChild(btn);
+      document.getElementById('gameMode').addEventListener('change', (e) => {
+        gameMode = e.target.value;
+        isZombieMode = gameMode.includes('zombie');
+        isTeamMode = gameMode.includes('tvt');
+        document.getElementById('roomCodeGroup').style.display = gameMode.includes('join') ? 'flex' : 'none';
+        document.getElementById('teamGroup').style.display = isTeamMode ? 'flex' : 'none';
+        checkLobbyReady();
       });
+
+      document.getElementById('playerName').addEventListener('input', checkLobbyReady);
+      document.getElementById('roomCode').addEventListener('input', checkLobbyReady);
+
+      const charList = document.getElementById('charList');
+      CHARACTERS.forEach(char => {
+        const btn = document.createElement('div');
+        btn.className = 'item-btn';
+        btn.innerText = char.name;
+        btn.onclick = () => {
+          document.querySelectorAll('#charList .item-btn').forEach(b => b.classList.remove('selected'));
+          btn.classList.add('selected');
+          selectedCharId = char.id;
+          const img = document.getElementById('previewImg');
+          img.src = char.img; img.style.display = 'block'; img.onerror = () => { img.onerror = null; img.style.display = 'none'; };
+          safeSetText('previewName', char.name); safeSetText('previewPower', char.ability); safeSetText('previewDesc', char.desc);
+          checkLobbyReady();
+        };
+        charList.appendChild(btn);
+      });
+
+      const weaponList = document.getElementById('weaponList');
       Object.values(WEAPONS).forEach(w => {
         if (w.id === 'faca' || w.id === 'granada') return;
-        const btn = document.createElement('div'); btn.className = 'item-btn'; btn.innerText = w.name;
-        btn.onclick = () => { document.querySelectorAll('#weaponList .item-btn').forEach(b => b.classList.remove('selected')); btn.classList.add('selected'); selectedWeaponId = w.id; checkLobbyReady(); };
-        document.getElementById('weaponList').appendChild(btn);
+        const btn = document.createElement('div');
+        btn.className = 'item-btn';
+        btn.innerText = w.name;
+        btn.onclick = () => {
+          document.querySelectorAll('#weaponList .item-btn').forEach(b => b.classList.remove('selected'));
+          btn.classList.add('selected');
+          selectedWeaponId = w.id;
+          checkLobbyReady();
+        };
+        weaponList.appendChild(btn);
       });
+
       document.getElementById('playBtn').onclick = () => {
-        nickname = document.getElementById('playerName').value.trim() || 'Jogador'; myTeam = document.getElementById('teamSelect').value;
-        if (gameMode === 'treino') { ui.lobby.style.display = 'none'; bootGameDirectly(); return; }
-        ui.lobby.style.display = 'none'; ui.preLobby.style.display = 'flex'; document.getElementById('multiplayerHUD').style.display = 'block'; document.getElementById('hudGameMode').innerText = isTeamMode ? 'EQUIPES' : (isZombieMode ? 'ZUMBIS' : 'MATA-MATA'); initMultiplayer();
+        nickname = document.getElementById('playerName').value.trim() || 'Jogador';
+        myTeam = document.getElementById('teamSelect').value;
+
+        if (gameMode === 'treino') {
+          ui.lobby.style.display = 'none';
+          bootGameDirectly();
+          return;
+        }
+
+        ui.lobby.style.display = 'none';
+        ui.preLobby.style.display = 'flex';
+        document.getElementById('multiplayerHUD').style.display = 'block';
+        document.getElementById('hudGameMode').innerText = isTeamMode ? 'EQUIPES' : (isZombieMode ? 'ZUMBIS' : 'MATA-MATA');
+        initMultiplayer();
       };
-      document.getElementById('leavePreLobbyBtn').onclick = () => window.location.reload(); document.getElementById('startMatchBtn').onclick = () => { if (isHost) hostStartMatch(); }; document.getElementById('spectateBtn').onclick = () => { document.getElementById('deathMenu').style.display = 'none'; startSpectating(); }; document.getElementById('backLobbyBtn').onclick = () => window.location.reload();
+
+      document.getElementById('leavePreLobbyBtn').onclick = () => window.location.reload();
+      document.getElementById('startMatchBtn').onclick = () => { if (isHost) hostStartMatch(); };
+      document.getElementById('spectateBtn').onclick = () => { document.getElementById('deathMenu').style.display = 'none'; startSpectating(); };
+      document.getElementById('backLobbyBtn').onclick = () => window.location.reload();
     }
 
     function checkLobbyReady() {
-      const hasName = document.getElementById('playerName').value.trim().length > 0; const hasCode = gameMode.includes('join') ? document.getElementById('roomCode').value.trim().length === 6 : true;
+      const hasName = document.getElementById('playerName').value.trim().length > 0;
+      const hasCode = gameMode.includes('join') ? document.getElementById('roomCode').value.trim().length === 6 : true;
       document.getElementById('playBtn').disabled = !(selectedCharId && selectedWeaponId && hasName && hasCode);
     }
     setupLobby();
 
+    // --- LÓGICA MULTIPLAYER (REDE) ---
     function initMultiplayer() {
       isHost = gameMode.includes('host');
+
       if (isHost) {
-        roomCode = Math.floor(100000 + Math.random() * 900000).toString(); safeSetText('roomCodeDisplay', roomCode); safeSetText('preRoomCode', roomCode); peer = new Peer(ROOM_PREFIX + roomCode);
-        peer.on('open', (id) => { localPlayerId = id; safeSetText('connStatus', 'Aguardando...'); document.getElementById('connStatus').style.color = '#00ffcc'; registerRoomPlayer(localPlayerId, { nickname, charId: selectedCharId, team: myTeam, host: true }); worldSeed = makeSnapshotSeed(); worldSnapshot = generateWorldSnapshot(); });
-        peer.on('connection', (conn) => { hostConnections.push(conn); setupPeerConnection(conn); }); peer.on('error', () => { safeSetText('connStatus', 'Erro'); document.getElementById('connStatus').style.color = '#ff4655'; });
+        roomCode = Math.floor(100000 + Math.random() * 900000).toString();
+        safeSetText('roomCodeDisplay', roomCode); safeSetText('preRoomCode', roomCode);
+        peer = new Peer(ROOM_PREFIX + roomCode);
+        peer.on('open', (id) => {
+          localPlayerId = id;
+          safeSetText('connStatus', 'Aguardando...'); document.getElementById('connStatus').style.color = '#00ffcc';
+          registerRoomPlayer(localPlayerId, { nickname, charId: selectedCharId, team: myTeam, host: true });
+          worldSeed = makeSnapshotSeed();
+          worldSnapshot = generateWorldSnapshot();
+        });
+        peer.on('connection', (conn) => { hostConnections.push(conn); setupPeerConnection(conn); });
+        peer.on('error', () => { safeSetText('connStatus', 'Erro'); document.getElementById('connStatus').style.color = '#ff4655'; });
       } else {
-        roomCode = document.getElementById('roomCode').value.trim(); safeSetText('roomCodeDisplay', roomCode); safeSetText('preRoomCode', roomCode); peer = new Peer();
-        peer.on('open', (id) => { localPlayerId = id; safeSetText('connStatus', 'Conectando...'); hostConn = peer.connect(ROOM_PREFIX + roomCode, { reliable: true }); setupPeerConnection(hostConn); });
+        roomCode = document.getElementById('roomCode').value.trim();
+        safeSetText('roomCodeDisplay', roomCode); safeSetText('preRoomCode', roomCode);
+        peer = new Peer();
+        peer.on('open', (id) => {
+          localPlayerId = id;
+          safeSetText('connStatus', 'Conectando...');
+          hostConn = peer.connect(ROOM_PREFIX + roomCode, { reliable: true });
+          setupPeerConnection(hostConn);
+        });
         peer.on('error', () => { safeSetText('connStatus', 'Erro'); document.getElementById('connStatus').style.color = '#ff4655'; });
       }
     }
 
     function setupPeerConnection(conn) {
-      const onOpen = () => { safeSetText('connStatus', 'CONECTADO!'); document.getElementById('connStatus').style.color = '#2ecc71'; sendNet({ type: 'hello', id: localPlayerId, nickname, charId: selectedCharId, team: myTeam, host: isHost }, conn); };
-      if (conn.open) onOpen(); else conn.on('open', onOpen);
+      const onOpen = () => {
+        safeSetText('connStatus', 'CONECTADO!'); document.getElementById('connStatus').style.color = '#2ecc71';
+        sendNet({ type: 'hello', id: localPlayerId, nickname, charId: selectedCharId, team: myTeam, host: isHost }, conn);
+      };
+
+      if (conn.open) onOpen();
+      else conn.on('open', onOpen);
+
       conn.on('data', (data) => handleNetData(data, conn));
-      conn.on('close', () => { cleanupDisconnectedPlayer(conn.peer); delete roomPlayers[conn.peer]; renderPreLobbyPlayers(); if (isHost) hostConnections = hostConnections.filter(c => c !== conn); else { safeSetText('connStatus', 'Desconectado'); document.getElementById('connStatus').style.color = '#ff4655'; } });
+      conn.on('close', () => {
+        cleanupDisconnectedPlayer(conn.peer);
+        delete roomPlayers[conn.peer]; renderPreLobbyPlayers();
+        if (isHost) hostConnections = hostConnections.filter(c => c !== conn);
+        else { safeSetText('connStatus', 'Desconectado'); document.getElementById('connStatus').style.color = '#ff4655'; }
+      });
     }
 
     function sendNet(data, specificConn = null) {
       if (gameMode === 'treino') return;
       if (specificConn) { if (specificConn.open) specificConn.send(data); return; }
-      if (isHost) hostConnections.forEach(conn => { if (conn.open) conn.send(data); }); else if (hostConn && hostConn.open) hostConn.send(data);
+      if (isHost) hostConnections.forEach(conn => { if (conn.open) conn.send(data); });
+      else if (hostConn && hostConn.open) hostConn.send(data);
     }
     
     function relayToOthers(data, exceptPeerId = null) {
@@ -669,25 +886,60 @@
     }
 
     function hostStartMatch() {
-      if (!isHost || gameStarted) return; gameStarted = true; sendNet({ type: 'matchStart', snapshot: worldSnapshot }); startMatchFromSnapshot(worldSnapshot);
+      if (!isHost || gameStarted) return;
+      gameStarted = true;
+      sendNet({ type: 'matchStart', snapshot: worldSnapshot });
+      startMatchFromSnapshot(worldSnapshot);
     }
 
     function handleNetData(data, conn) {
       if (!data?.type) return;
-      if (isHost && conn && ['hello', 'playerUpdate', 'playerShoot', 'hitPlayer', 'playerGrenade', 'playerDead', 'skillUse', 'skillRemove', 'rocketFire', 'pickupItem', 'dropWeapon'].includes(data.type)) relayToOthers(data, conn.peer);
+
+      if (isHost && conn) {
+        if ([
+          'hello', 'playerUpdate', 'playerShoot', 'hitPlayer', 'playerGrenade', 'playerDead', 'skillUse', 'skillRemove',
+          'rocketFire', 'pickupItem', 'dropWeapon', 'chatMessage'
+        ].includes(data.type)) relayToOthers(data, conn.peer);
+      }
 
       switch (data.type) {
         case 'hello': {
-          registerRoomPlayer(data.id, data); ensureOtherPlayer(data);
-          if (isHost && conn) { sendNet({ type: 'roomRoster', players: Object.values(roomPlayers).filter(Boolean) }, conn); sendNet({ type: 'worldPreview', snapshot: worldSnapshot }, conn); relayToOthers({ type: 'roomRoster', players: Object.values(roomPlayers).filter(Boolean) }, conn.peer); }
+          registerRoomPlayer(data.id, data);
+          ensureOtherPlayer(data);
+          if (isHost && conn) {
+            sendNet({ type: 'roomRoster', players: Object.values(roomPlayers).filter(Boolean) }, conn);
+            sendNet({ type: 'worldPreview', snapshot: worldSnapshot }, conn);
+            relayToOthers({ type: 'roomRoster', players: Object.values(roomPlayers).filter(Boolean) }, conn.peer);
+          }
           break;
         }
-        case 'roomRoster': data.players.forEach(p => registerRoomPlayer(p.id, p)); registerRoomPlayer(localPlayerId, { nickname, charId: selectedCharId, team: myTeam, host: isHost }); break;
-        case 'worldPreview': if (!isHost && data.snapshot) worldSnapshot = data.snapshot; break;
-        case 'matchStart': if (!gameStarted) startMatchFromSnapshot(data.snapshot); break;
+        case 'roomRoster': {
+          data.players.forEach(p => registerRoomPlayer(p.id, p));
+          registerRoomPlayer(localPlayerId, { nickname, charId: selectedCharId, team: myTeam, host: isHost });
+          break;
+        }
+        case 'worldPreview': {
+          if (!isHost && data.snapshot) worldSnapshot = data.snapshot;
+          break;
+        }
+        case 'matchStart': {
+          if (!gameStarted) startMatchFromSnapshot(data.snapshot);
+          break;
+        }
         case 'playerUpdate': updateOtherPlayer(data); break;
         case 'playerShoot': handleRemoteShot(data); break;
-        case 'hitPlayer': if (data.targetId === localPlayerId && !gameOver) applyDamageToLocalPlayer(data.damage, data.fromId, data.hitPos || null, data.meta || null); break;
+        case 'hitPlayer': {
+          if (data.targetId === localPlayerId && !gameOver) {
+            applyDamageToLocalPlayer(data.damage, data.fromId, data.hitPos || null, data.meta || null);
+          } else if (otherPlayers[data.targetId]) {
+            // Update the health bar for everyone else so they see the damage rolando
+            const p = otherPlayers[data.targetId];
+            p.hp = Math.max(0, p.hp - data.damage);
+            updateHealthBar(p.healthBar, p.hp, 100);
+            pulseDamageMesh(p.group.position.clone().add(new THREE.Vector3(0, 9, 0)), 0xff5555, 2.6);
+          }
+          break;
+        }
         case 'playerGrenade': spawnRemoteGrenade(data); break;
         case 'playerDead': if (otherPlayers[data.id]) { otherPlayers[data.id].isDead = true; otherPlayers[data.id].group.rotation.x = -Math.PI / 2; updateHealthBar(otherPlayers[data.id].healthBar, 0, 100); } break;
         case 'skillUse': applyRemoteSkill(data); break;
@@ -695,42 +947,150 @@
         case 'rocketFire': spawnRemoteRocket(data); break;
         case 'pickupItem': confirmRemoveItem(data.itemId); break;
         case 'dropWeapon': spawnDroppedWeapon(data.weaponId, new THREE.Vector3(data.x, data.y, data.z), data.dropId); break;
-        case 'zombieSync': if (!isHost) syncRemoteZombies(data.zombies); break;
+        
+        // --- ZUMBI NETWORK (O SEGREDO DO SYNC!) ---
+        case 'zombieSpawn':
+          createZombieLocal(data.z);
+          break;
+        case 'zombiesSync':
+          data.zs.forEach(zd => {
+             const z = zombies.find(z => z.id === zd.i);
+             if (z && !z.isDead) {
+                z.mesh.position.x = zd.x;
+                z.mesh.position.y = zd.y;
+                z.mesh.position.z = zd.z;
+                // Vira para quem está atacando (opcional visual)
+                if (zd.tx !== undefined && zd.tz !== undefined) {
+                    z.mesh.lookAt(zd.tx, z.mesh.position.y, zd.tz);
+                }
+                if (z.hp !== zd.h) updateHealthBar(z.healthBar, zd.h, z.maxHp);
+                z.hp = zd.h;
+             }
+          });
+          break;
+
+        case 'chatMessage':
+          addChatMessage(data.sender, data.text);
+          break;
       }
     }
 
-    function cleanupDisconnectedPlayer(id) { const p = otherPlayers[id]; if (!p) return; if (scene) removeAndDispose(p.group); delete otherPlayers[id]; }
+    // --- SISTEMA DE CHAT ---
+    function addChatMessage(sender, text) {
+      const container = document.getElementById('chatContainer');
+      const messages = document.getElementById('chatMessages');
+      container.style.display = 'flex';
+      
+      const el = document.createElement('div');
+      el.className = 'chat-msg';
+      el.innerHTML = `<span class="name">${sender}:</span> ${text}`;
+      messages.appendChild(el);
+      messages.scrollTop = messages.scrollHeight;
+
+      // Oculta depois de um tempo se não tiver focado
+      setTimeout(() => {
+        if (document.activeElement !== document.getElementById('chatInput')) {
+          // container.style.display = 'none'; // Descomente pra fazer o chat sumir sozinho
+        }
+      }, 8000);
+    }
+
+    function cleanupDisconnectedPlayer(id) {
+      const p = otherPlayers[id];
+      if (!p) return;
+      if (scene) removeAndDispose(p.group); delete otherPlayers[id];
+    }
 
     function buildPlayerMesh(p) {
       if (typeof scene === 'undefined' || !scene) return;
-      const charData = charById(p.charId) || CHARACTERS[0]; p.group = new THREE.Group();
+      
+      const charData = charById(p.charId) || CHARACTERS[0];
+      p.group = new THREE.Group();
+      
+      const bodyGeo = new THREE.BoxGeometry(4, 10, 4);
       const bodyColor = isTeamMode ? (p.team === 'alpha' ? 0x3498db : 0xe74c3c) : 0xcccccc;
-      const body = new THREE.Mesh(new THREE.BoxGeometry(4, 10, 4), new THREE.MeshStandardMaterial({ color: bodyColor })); body.position.y = 5;
-      const head = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 4), new THREE.MeshStandardMaterial({ map: loadTextureSafe(charData.img), color: 0xffffff })); head.position.y = 12;
-      p.group.add(body); p.group.add(head); p.healthBar = makeHealthBar(10, 16); p.group.add(p.healthBar); scene.add(p.group);
+      const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor });
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      body.position.y = 5;
+
+      const headGeo = new THREE.BoxGeometry(4, 4, 4);
+      const headMat = new THREE.MeshStandardMaterial({ map: loadTextureSafe(charData.img), color: 0xffffff });
+      const head = new THREE.Mesh(headGeo, headMat);
+      head.position.y = 12;
+
+      p.group.add(body);
+      p.group.add(head);
+
+      p.healthBar = makeHealthBar(10, 16);
+      p.group.add(p.healthBar);
+
+      scene.add(p.group);
     }
 
     function ensureOtherPlayer(data) {
       if (!data.id || data.id === localPlayerId) return;
-      if (otherPlayers[data.id]) { if (typeof scene !== 'undefined' && scene && (!otherPlayers[data.id].group || otherPlayers[data.id].group.children.length === 0)) buildPlayerMesh(otherPlayers[data.id]); return; }
-      const p = { id: data.id, nickname: data.nickname || 'Jogador', team: data.team, charId: data.charId, group: new THREE.Group(), healthBar: null, hp: 100, isDead: false, invisibleUntil: 0, skillRefs: {} };
-      otherPlayers[data.id] = p; if (typeof scene !== 'undefined' && scene) buildPlayerMesh(p);
+
+      if (otherPlayers[data.id]) {
+         if (typeof scene !== 'undefined' && scene && (!otherPlayers[data.id].group || otherPlayers[data.id].group.children.length === 0)) {
+             buildPlayerMesh(otherPlayers[data.id]);
+         }
+         return;
+      }
+
+      const p = {
+        id: data.id,
+        nickname: data.nickname || 'Jogador',
+        team: data.team,
+        charId: data.charId,
+        group: new THREE.Group(),
+        healthBar: null,
+        hp: 100,
+        isDead: false,
+        invisibleUntil: 0,
+        skillRefs: {}
+      };
+
+      otherPlayers[data.id] = p;
+
+      if (typeof scene !== 'undefined' && scene) {
+        buildPlayerMesh(p);
+      }
     }
 
     function updateOtherPlayer(data) {
-      if (!data.id || data.id === localPlayerId) return; ensureOtherPlayer(data); const p = otherPlayers[data.id]; if (!p || !p.group) return;
+      if (!data.id || data.id === localPlayerId) return;
+      ensureOtherPlayer(data);
+      const p = otherPlayers[data.id];
+      if (!p || !p.group) return;
       p.nickname = data.nickname ?? p.nickname; p.team = data.team ?? p.team; p.hp = typeof data.hp === 'number' ? data.hp : p.hp; p.isDead = !!data.isDead;
-      p.group.position.set(data.x, data.y - 10, data.z); p.group.rotation.y = data.rot; p.group.visible = nowMs() > (p.invisibleUntil || 0); updateHealthBar(p.healthBar, p.hp, 100);
+      p.group.position.set(data.x, data.y - 10, data.z); p.group.rotation.y = data.rot; p.group.visible = nowMs() > (p.invisibleUntil || 0);
+      updateHealthBar(p.healthBar, p.hp, 100);
     }
 
     function bootGameDirectly() {
-      document.getElementById('gameUI').style.display = 'flex'; document.getElementById('weaponPanel').style.display = 'block'; worldSeed = makeSnapshotSeed(); worldSnapshot = generateWorldSnapshot(); startMatchFromSnapshot(worldSnapshot);
+      document.getElementById('gameUI').style.display = 'flex';
+      document.getElementById('weaponPanel').style.display = 'block';
+      document.getElementById('chatContainer').style.display = 'flex';
+      worldSeed = makeSnapshotSeed();
+      worldSnapshot = generateWorldSnapshot();
+      startMatchFromSnapshot(worldSnapshot);
     }
 
     function startMatchFromSnapshot(snapshot) {
-      worldSnapshot = snapshot; gameStarted = true; ui.preLobby.style.display = 'none'; document.getElementById('gameUI').style.display = 'flex'; document.getElementById('weaponPanel').style.display = 'block';
+      worldSnapshot = snapshot;
+      gameStarted = true;
+      ui.preLobby.style.display = 'none';
+      document.getElementById('gameUI').style.display = 'flex';
+      document.getElementById('weaponPanel').style.display = 'block';
+      document.getElementById('chatContainer').style.display = 'flex';
       if (isZombieMode) { document.getElementById('waveHUD').style.display = 'block'; document.getElementById('flashlightHint').style.display = 'block'; }
-      initGame(); Object.values(otherPlayers).forEach(p => { if (typeof scene !== 'undefined' && scene && (!p.group || p.group.children.length === 0)) buildPlayerMesh(p); });
+      initGame();
+
+      Object.values(otherPlayers).forEach(p => {
+          if (typeof scene !== 'undefined' && scene && (!p.group || p.group.children.length === 0)) {
+              buildPlayerMesh(p);
+          }
+      });
     }
 
     function initGame() {
@@ -743,44 +1103,101 @@
         scene.background = new THREE.Color(0x87CEEB); scene.fog = new THREE.Fog(0x87CEEB, 90, 520); scene.add(new THREE.AmbientLight(0xffffff, 0.72));
         const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(200, 300, 100); scene.add(sun);
       }
-      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1400); scene.add(camera); camera.add(weaponPivot);
-      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' }); renderer.setSize(window.innerWidth, window.innerHeight); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); renderer.shadowMap.enabled = false; document.body.appendChild(renderer.domElement);
-      controls = new PointerLockControls(camera, document.body); scene.add(controls.getObject()); controls.getObject().position.copy(chooseSpawnForPlayer(localPlayerId));
-      const blocker = document.getElementById('blocker'); blocker.style.display = 'flex'; controls.addEventListener('lock', () => blocker.style.display = 'none'); controls.addEventListener('unlock', () => { if (!gameOver && !isSpectating) blocker.style.display = 'flex'; }); blocker.addEventListener('click', () => { if (!gameOver && !isSpectating) controls.lock(); });
-      setupInputs(); buildMap(); setupFlashlight(); spawnSnapshotItems(); equipLoadout(); startNetworkingLoop(); if (isZombieMode && isHost) startZombieWave(); window.addEventListener('resize', onWindowResize); animate();
+
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1400);
+      scene.add(camera); camera.add(weaponPivot);
+      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+      renderer.setSize(window.innerWidth, window.innerHeight); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); renderer.shadowMap.enabled = false;
+      document.body.appendChild(renderer.domElement);
+      controls = new PointerLockControls(camera, document.body);
+      scene.add(controls.getObject());
+      controls.getObject().position.copy(chooseSpawnForPlayer(localPlayerId));
+
+      const blocker = document.getElementById('blocker'); blocker.style.display = 'flex';
+      controls.addEventListener('lock', () => blocker.style.display = 'none');
+      controls.addEventListener('unlock', () => { if (!gameOver && !isSpectating) blocker.style.display = 'flex'; });
+      blocker.addEventListener('click', () => { if (!gameOver && !isSpectating) controls.lock(); });
+
+      setupInputs();
+      buildMap();
+      setupFlashlight();
+      spawnSnapshotItems();
+      equipLoadout();
+      startNetworkingLoop();
+      if (isZombieMode && isHost) startZombieWave();
+      window.addEventListener('resize', onWindowResize);
+      animate();
     }
 
-    function onWindowResize() { if (!camera || !renderer) return; camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }
+    function onWindowResize() {
+      if (!camera || !renderer) return;
+      camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight);
+    }
 
     function buildMap() { if (isZombieMode) buildForestMap(); else buildArenaMap(); }
 
     function buildArenaMap() {
-      const mapSize = 520; const floorTex = createGridTexture('#2a2e33', '#1f2326', 22, 22); const floor = new THREE.Mesh(new THREE.PlaneGeometry(mapSize, mapSize), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 1 })); floor.rotation.x = -Math.PI / 2; scene.add(floor); mapObjects.push(floor);
-      const wallTex = createGridTexture('#1d242f', '#00ffcc', 5, 1); const wallMat = new THREE.MeshStandardMaterial({ map: wallTex }); const limit = mapSize / 2;
-      [{ pos:[0,40,-limit], size:[mapSize,80,4] },{ pos:[0,40, limit], size:[mapSize,80,4] },{ pos:[-limit,40,0], size:[4,80,mapSize] },{ pos:[ limit,40,0], size:[4,80,mapSize] }].forEach(w => { const wall = new THREE.Mesh(new THREE.BoxGeometry(...w.size), wallMat); wall.position.set(...w.pos); addMapObject(wall, true); });
-      const boxMat = new THREE.MeshStandardMaterial({ color: 0x2e4a3d }); worldSnapshot.arenaObstacles.forEach(o => { const box = new THREE.Mesh(new THREE.BoxGeometry(o.w, o.h, o.d), boxMat); box.position.set(o.x, o.y, o.z); addMapObject(box, true); });
+      const mapSize = 520;
+      const floorTex = createGridTexture('#2a2e33', '#1f2326', 22, 22);
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(mapSize, mapSize), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 1 }));
+      floor.rotation.x = -Math.PI / 2; scene.add(floor); mapObjects.push(floor);
+      const wallTex = createGridTexture('#1d242f', '#00ffcc', 5, 1);
+      const wallMat = new THREE.MeshStandardMaterial({ map: wallTex });
+      const limit = mapSize / 2;
+      [{ pos:[0,40,-limit], size:[mapSize,80,4] },{ pos:[0,40, limit], size:[mapSize,80,4] },{ pos:[-limit,40,0], size:[4,80,mapSize] },{ pos:[ limit,40,0], size:[4,80,mapSize] }].forEach(w => {
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(...w.size), wallMat); wall.position.set(...w.pos); addMapObject(wall, true);
+      });
+      const boxMat = new THREE.MeshStandardMaterial({ color: 0x2e4a3d });
+      worldSnapshot.arenaObstacles.forEach(o => {
+        const box = new THREE.Mesh(new THREE.BoxGeometry(o.w, o.h, o.d), boxMat);
+        box.position.set(o.x, o.y, o.z); addMapObject(box, true);
+      });
     }
 
     function createTree(x, z) {
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.8, 18, 8), new THREE.MeshStandardMaterial({ color: 0x5b3a1e, roughness: 1 })); trunk.position.set(x, 9, z);
-      const leaves = new THREE.Group(); for (let i = 0; i < 3; i++) { const cone = new THREE.Mesh(new THREE.ConeGeometry(9 - i * 1.6, 12, 10), new THREE.MeshStandardMaterial({ color: i === 0 ? 0x1f5c2e : 0x2e7a3d, roughness: 1 })); cone.position.set(x, 18 + i * 6, z); leaves.add(cone); }
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.8, 18, 8), new THREE.MeshStandardMaterial({ color: 0x5b3a1e, roughness: 1 }));
+      trunk.position.set(x, 9, z);
+      const leaves = new THREE.Group();
+      for (let i = 0; i < 3; i++) {
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(9 - i * 1.6, 12, 10), new THREE.MeshStandardMaterial({ color: i === 0 ? 0x1f5c2e : 0x2e7a3d, roughness: 1 }));
+        cone.position.set(x, 18 + i * 6, z); leaves.add(cone);
+      }
       const tree = new THREE.Group(); tree.add(trunk); tree.add(leaves); trunk.userData.isTreeTrunk = true; scene.add(tree); colliders.push(trunk); trees.push(tree);
     }
 
     function buildForestMap() {
-      const mapSize = 560; const floorTex = createGridTexture('#1a2a1d', '#122018', 32, 32); const floor = new THREE.Mesh(new THREE.PlaneGeometry(mapSize, mapSize), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 1 })); floor.rotation.x = -Math.PI / 2; scene.add(floor); mapObjects.push(floor);
-      const wallMat = new THREE.MeshStandardMaterial({ color: 0x102010 }); const limit = mapSize / 2;
-      [{ pos:[0,30,-limit], size:[mapSize,60,6] },{ pos:[0,30, limit], size:[mapSize,60,6] },{ pos:[-limit,30,0], size:[6,60,mapSize] },{ pos:[ limit,30,0], size:[6,60,mapSize] }].forEach(w => { const wall = new THREE.Mesh(new THREE.BoxGeometry(...w.size), wallMat); wall.position.set(...w.pos); addMapObject(wall, true); });
-      const rockMat = new THREE.MeshStandardMaterial({ color: 0x3b423c, roughness: 1 }); worldSnapshot.forestRocks.forEach(r => { const rock = new THREE.Mesh(new THREE.BoxGeometry(r.w, r.h, r.d), rockMat); rock.position.set(r.x, r.y, r.z); addMapObject(rock, true); });
+      const mapSize = 560;
+      const floorTex = createGridTexture('#1a2a1d', '#122018', 32, 32);
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(mapSize, mapSize), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 1 }));
+      floor.rotation.x = -Math.PI / 2; scene.add(floor); mapObjects.push(floor);
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0x102010 });
+      const limit = mapSize / 2;
+      [{ pos:[0,30,-limit], size:[mapSize,60,6] },{ pos:[0,30, limit], size:[mapSize,60,6] },{ pos:[-limit,30,0], size:[6,60,mapSize] },{ pos:[ limit,30,0], size:[6,60,mapSize] }].forEach(w => {
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(...w.size), wallMat); wall.position.set(...w.pos); addMapObject(wall, true);
+      });
+      const rockMat = new THREE.MeshStandardMaterial({ color: 0x3b423c, roughness: 1 });
+      worldSnapshot.forestRocks.forEach(r => {
+        const rock = new THREE.Mesh(new THREE.BoxGeometry(r.w, r.h, r.d), rockMat); rock.position.set(r.x, r.y, r.z); addMapObject(rock, true);
+      });
       worldSnapshot.forestTrees.forEach(t => createTree(t.x, t.z));
-      const camp = new THREE.Mesh(new THREE.CylinderGeometry(18, 18, 1.2, 24), new THREE.MeshBasicMaterial({ color: 0x3b2c12, transparent: true, opacity: 0.3 })); camp.position.set(0, 0.7, 0); scene.add(camp);
+      const camp = new THREE.Mesh(new THREE.CylinderGeometry(18, 18, 1.2, 24), new THREE.MeshBasicMaterial({ color: 0x3b2c12, transparent: true, opacity: 0.3 }));
+      camp.position.set(0, 0.7, 0); scene.add(camp);
       const fire = new THREE.PointLight(0xff8a33, 1.8, 100); fire.position.set(0, 8, 0); scene.add(fire);
     }
 
     function createWeaponModel(weaponId) {
-      const group = new THREE.Group(); const matDark = new THREE.MeshStandardMaterial({ color: 0x111111 }); const matMain = new THREE.MeshStandardMaterial({ color: WEAPONS[weaponId].color }); let mesh, barrel, mag;
+      const group = new THREE.Group();
+      const matDark = new THREE.MeshStandardMaterial({ color: 0x111111 });
+      const matMain = new THREE.MeshStandardMaterial({ color: WEAPONS[weaponId].color });
+      let mesh, barrel, mag;
       switch (weaponId) {
-        case 'faca': { const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 1.2), matDark); handle.position.set(0, -0.6, 0); const guard = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.4), matDark); const blade = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2, 0.05), new THREE.MeshStandardMaterial({ color: 0xcccccc })); blade.position.set(0, 1.05, 0); const tip = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.5, 4), new THREE.MeshStandardMaterial({ color: 0xcccccc })); tip.position.set(0, 2.3, 0); tip.rotation.y = Math.PI / 4; mesh = new THREE.Group(); mesh.add(handle, guard, blade, tip); mesh.rotation.set(Math.PI / 2, Math.PI / 12, 0); mesh.position.set(1.5, -1.5, -4); group.add(mesh); break; }
+        case 'faca': {
+          const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 1.2), matDark); handle.position.set(0, -0.6, 0);
+          const guard = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.4), matDark);
+          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2, 0.05), new THREE.MeshStandardMaterial({ color: 0xcccccc })); blade.position.set(0, 1.05, 0);
+          const tip = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.5, 4), new THREE.MeshStandardMaterial({ color: 0xcccccc })); tip.position.set(0, 2.3, 0); tip.rotation.y = Math.PI / 4;
+          mesh = new THREE.Group(); mesh.add(handle, guard, blade, tip); mesh.rotation.set(Math.PI / 2, Math.PI / 12, 0); mesh.position.set(1.5, -1.5, -4); group.add(mesh); break;
+        }
         case 'granada': mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 0), matMain); mesh.position.set(2, -2, -4); group.add(mesh); break;
         case 'pistola': mesh = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1, 3), matMain); mag = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.5, 0.8), matDark); mag.position.set(0, -1, 0.5); mesh.add(mag); mesh.position.set(1.5, -1.5, -4); group.add(mesh); break;
         case 'fuzil': mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1.5, 6), matMain); barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 4), matDark); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.3, -4); mesh.add(barrel); mag = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2, 1.5), matDark); mag.position.set(0, -1.5, 0); mesh.add(mag); mesh.position.set(1.5, -2, -5); group.add(mesh); break;
@@ -792,64 +1209,91 @@
     }
 
     function spawnSnapshotItems() {
+      const weaponDropIds = new Set();
       worldSnapshot.items.forEach(item => {
         let mesh;
         if (item.type === 'ammo') mesh = new THREE.Sprite(new THREE.SpriteMaterial({ map: loadTextureSafe('ammo.png') })), mesh.scale.set(6, 6, 1);
         else if (item.type === 'cura') mesh = new THREE.Sprite(new THREE.SpriteMaterial({ map: loadTextureSafe('cura.png') })), mesh.scale.set(6, 6, 1);
         else if (item.type === 'granada') mesh = new THREE.Sprite(new THREE.SpriteMaterial({ map: loadTextureSafe('granada.png') })), mesh.scale.set(4, 4, 1);
-        else mesh = createWeaponModel(item.weaponId), mesh.scale.set(1.45, 1.45, 1.45);
-        mesh.position.set(item.x, item.y, item.z); scene.add(mesh); itemsOnGround.push({ ...item, mesh, picked: false });
+        else mesh = createWeaponModel(item.weaponId), mesh.scale.set(1.45, 1.45, 1.45), weaponDropIds.add(item.id);
+        
+        mesh.position.set(item.x, item.y + 2, item.z); // Flutuar acima do chão
+        scene.add(mesh); itemsOnGround.push({ ...item, mesh, picked: false });
       });
     }
 
     function equipLoadout() {
-      const charData = charById(selectedCharId); const teamStr = isTeamMode ? (myTeam === 'alpha' ? ' [ALPHA]' : ' [OMEGA]') : ''; safeSetText('hudPlayerName', `${nickname} [${charData.name}]${teamStr}`); document.getElementById('characterIcon').style.backgroundImage = `url(${charData.img})`;
+      const charData = charById(selectedCharId);
+      const teamStr = isTeamMode ? (myTeam === 'alpha' ? ' [ALPHA]' : ' [OMEGA]') : '';
+      safeSetText('hudPlayerName', `${nickname} [${charData.name}]${teamStr}`);
+      document.getElementById('characterIcon').style.backgroundImage = `url(${charData.img})`;
       playerLoadout.primary = { ...WEAPONS[selectedWeaponId], currentAmmo: WEAPONS[selectedWeaponId].maxAmmo, reserveAmmo: WEAPONS[selectedWeaponId].maxReserve, model: createWeaponModel(selectedWeaponId) };
       playerLoadout.melee = { ...WEAPONS.faca, currentAmmo: Infinity, reserveAmmo: Infinity, model: createWeaponModel('faca') };
       playerLoadout.grenade = { ...WEAPONS.granada, model: createWeaponModel('granada') };
-      playerLoadout.grenadesCount = 0; switchSlot(1); updateStatusUI();
+      playerLoadout.grenadesCount = 0;
+      switchSlot(1); updateStatusUI();
     }
 
     function switchSlot(slot) {
       if (isSpectating) return; if (slot === 3 && playerLoadout.grenadesCount <= 0) return; if (isScoped) toggleScope();
-      playerLoadout.currentSlot = slot; const wpn = slot === 1 ? playerLoadout.primary : slot === 2 ? playerLoadout.melee : playerLoadout.grenade;
-      weaponPivot.clear(); activeWeaponMesh = wpn.model; activeWeaponMesh.scale.set(1, 1, 1); weaponPivot.add(activeWeaponMesh); safeSetText('weaponName', wpn.name); updateAmmoUI();
+      playerLoadout.currentSlot = slot;
+      const wpn = slot === 1 ? playerLoadout.primary : slot === 2 ? playerLoadout.melee : playerLoadout.grenade;
+      weaponPivot.clear(); activeWeaponMesh = wpn.model; activeWeaponMesh.scale.set(1, 1, 1); weaponPivot.add(activeWeaponMesh);
+      safeSetText('weaponName', wpn.name); updateAmmoUI();
     }
 
     function updateAmmoUI() {
       const wpn = playerLoadout.currentSlot === 1 ? playerLoadout.primary : playerLoadout.currentSlot === 2 ? playerLoadout.melee : playerLoadout.grenade;
-      if (playerLoadout.currentSlot === 3) { safeSetText('ammoCount', playerLoadout.grenadesCount); safeSetText('reserveAmmo', ''); } else { safeSetText('ammoCount', wpn.currentAmmo === Infinity ? '∞' : wpn.currentAmmo); safeSetText('reserveAmmo', wpn.reserveAmmo === Infinity ? '' : `/ ${wpn.reserveAmmo}`); }
-      safeSetText('grenadeCount', playerLoadout.grenadesCount); document.getElementById('reloadHint').style.display = (wpn.currentAmmo === 0 && wpn.reserveAmmo > 0 && playerLoadout.currentSlot === 1) ? 'block' : 'none';
+      if (playerLoadout.currentSlot === 3) { safeSetText('ammoCount', playerLoadout.grenadesCount); safeSetText('reserveAmmo', ''); }
+      else { safeSetText('ammoCount', wpn.currentAmmo === Infinity ? '∞' : wpn.currentAmmo); safeSetText('reserveAmmo', wpn.reserveAmmo === Infinity ? '' : `/ ${wpn.reserveAmmo}`); }
+      safeSetText('grenadeCount', playerLoadout.grenadesCount);
+      document.getElementById('reloadHint').style.display = (wpn.currentAmmo === 0 && wpn.reserveAmmo > 0 && playerLoadout.currentSlot === 1) ? 'block' : 'none';
     }
 
     function reloadWeapon() {
-      if (isSpectating) return; const wpn = playerLoadout.currentSlot === 1 ? playerLoadout.primary : null; if (!wpn || wpn.reserveAmmo <= 0 || wpn.currentAmmo === wpn.maxAmmo) return;
+      if (isSpectating) return;
+      const wpn = playerLoadout.currentSlot === 1 ? playerLoadout.primary : null;
+      if (!wpn || wpn.reserveAmmo <= 0 || wpn.currentAmmo === wpn.maxAmmo) return;
       const add = Math.min(wpn.maxAmmo - wpn.currentAmmo, wpn.reserveAmmo); wpn.currentAmmo += add; wpn.reserveAmmo -= add; updateAmmoUI();
     }
 
     function toggleScope() {
-      if (isSpectating) return; const wpn = playerLoadout.currentSlot === 1 ? playerLoadout.primary : null; if (!wpn || !wpn.scoped) return; isScoped = !isScoped;
+      if (isSpectating) return;
+      const wpn = playerLoadout.currentSlot === 1 ? playerLoadout.primary : null;
+      if (!wpn || !wpn.scoped) return;
+      isScoped = !isScoped;
       if (isScoped) { camera.fov = 20; document.getElementById('sniperScope').style.display = 'block'; document.getElementById('crosshair').style.display = 'none'; activeWeaponMesh.visible = false; }
       else { camera.fov = 75; document.getElementById('sniperScope').style.display = 'none'; document.getElementById('crosshair').style.display = 'block'; activeWeaponMesh.visible = true; }
       camera.updateProjectionMatrix();
     }
 
     function getShootTargets() {
-      const targets = []; for(let i=0; i < colliders.length; i++) { targets.push(colliders[i]); }
+      const targets = [];
+      for(let i=0; i < colliders.length; i++) { targets.push(colliders[i]); }
       if (isZombieMode) zombies.forEach(z => { if (!z.isDead) targets.push(z.mesh); });
-      Object.values(otherPlayers).forEach(op => { if (!op.isDead) targets.push(op.group); }); return targets;
+      Object.values(otherPlayers).forEach(op => { if (!op.isDead) targets.push(op.group); });
+      return targets;
     }
 
     function computeDamage(base, targetId, weaponId) {
-      let dmg = base; if (isCrouching) dmg *= localEffects.crouchDamageMult; if (selectedCharId === 'joão' && weaponId === 'faca' && localEffects.joaoOneShotKnifeUntil > nowMs()) dmg = 9999; return Math.floor(dmg);
+      let dmg = base;
+      if (isCrouching) dmg *= localEffects.crouchDamageMult;
+      if (selectedCharId === 'joão' && weaponId === 'faca' && localEffects.joaoOneShotKnifeUntil > nowMs()) dmg = 9999;
+      return Math.floor(dmg);
     }
 
     function playShotVisual(start, end, color = 0xffff00) {
-      const geo = new THREE.BufferGeometry().setFromPoints([start, end]); const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 }); const tracer = new THREE.Line(geo, mat);
-      scene.add(tracer); setTimeout(() => removeAndDispose(tracer), 60);
+      const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
+      const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 });
+      const tracer = new THREE.Line(geo, mat);
+      scene.add(tracer); 
+      setTimeout(() => removeAndDispose(tracer), 60); 
     }
 
-    function isProtectedByGabrielaTotemLocal() { const p = getPlayerPosition(); return localHealTotems.some(t => nowMs() < t.until && distance2D(p, t.position) <= t.radius); }
+    function isProtectedByGabrielaTotemLocal() {
+      const p = getPlayerPosition();
+      return localHealTotems.some(t => nowMs() < t.until && distance2D(p, t.position) <= t.radius);
+    }
 
     function applyDamageToZombie(zombie, damage) {
       if (!zombie || zombie.isDead) return;
@@ -858,33 +1302,56 @@
     }
 
     function applyDamageToLocalPlayer(damage, fromId = null, hitPos = null, meta = null) {
-      if (isProtectedByGabrielaTotemLocal()) return; if (localEffects.joaoShieldUntil > nowMs()) { showHitOverlay(); return; }
-      let remaining = damage; if (playerArmor > 0) { const armorAbsorb = Math.min(playerArmor, remaining * 0.75); playerArmor -= armorAbsorb; remaining -= armorAbsorb; }
-      if (remaining > 0) playerHP -= remaining; showHitOverlay(); updateStatusUI(); if (playerHP <= 0 && !gameOver) sendNet({ type: 'playerDead', id: localPlayerId, fromId, meta });
+      if (isProtectedByGabrielaTotemLocal()) return;
+      if (localEffects.joaoShieldUntil > nowMs()) { showHitOverlay(); return; }
+      let remaining = damage;
+      if (playerArmor > 0) {
+        const armorAbsorb = Math.min(playerArmor, remaining * 0.75);
+        playerArmor -= armorAbsorb; remaining -= armorAbsorb;
+      }
+      if (remaining > 0) playerHP -= remaining;
+      showHitOverlay(); updateStatusUI();
+      if (playerHP <= 0 && !gameOver) sendNet({ type: 'playerDead', id: localPlayerId, fromId, meta });
     }
 
     function shoot() {
-      if (isSpectating) return; const time = performance.now() / 1000; const wpn = playerLoadout.currentSlot === 1 ? playerLoadout.primary : playerLoadout.currentSlot === 2 ? playerLoadout.melee : null;
+      if (isSpectating) return;
+      const time = performance.now() / 1000;
+      const wpn = playerLoadout.currentSlot === 1 ? playerLoadout.primary : playerLoadout.currentSlot === 2 ? playerLoadout.melee : null;
       if (playerLoadout.currentSlot === 3) { throwGrenadeObj(); return; }
       if (!wpn) return; if (time - lastShotTime < wpn.fireRate) return; if (wpn.currentAmmo !== Infinity && wpn.currentAmmo <= 0) return;
-      lastShotTime = time; if (wpn.currentAmmo !== Infinity) { wpn.currentAmmo--; updateAmmoUI(); }
+      
+      lastShotTime = time; 
+      if (wpn.currentAmmo !== Infinity) { wpn.currentAmmo--; updateAmmoUI(); }
       
       if (activeWeaponMesh && !isScoped) {
         const gun = activeWeaponMesh.children[0] || activeWeaponMesh; 
-        if(!gun.userData.baseZ) gun.userData.baseZ = gun.position.z; if(!gun.userData.baseRotX) gun.userData.baseRotX = gun.rotation.x;
-        gun.position.z = gun.userData.baseZ + 0.5; gun.rotation.x = gun.userData.baseRotX + 0.1;
+        if(!gun.userData.baseZ) gun.userData.baseZ = gun.position.z;
+        if(!gun.userData.baseRotX) gun.userData.baseRotX = gun.rotation.x;
+
+        gun.position.z = gun.userData.baseZ + 0.5;
+        gun.rotation.x = gun.userData.baseRotX + 0.1;
         if (wpn.id === 'minigun') gun.rotation.z += Math.PI / 3;
-        setTimeout(() => { if (!gun) return; gun.position.z = gun.userData.baseZ; gun.rotation.x = gun.userData.baseRotX; }, 50);
+        
+        setTimeout(() => { 
+          if (!gun) return; 
+          gun.position.z = gun.userData.baseZ; 
+          gun.rotation.x = gun.userData.baseRotX; 
+        }, 50);
       }
 
       const targets = getShootTargets();
       
+      const origin = camera.getWorldPosition(new THREE.Vector3()); 
+      const defaultDir = new THREE.Vector3(); camera.getWorldDirection(defaultDir);
+
       for (let i = 0; i < wpn.pellets; i++) {
-        const raycaster = new THREE.Raycaster(); const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+        const raycaster = new THREE.Raycaster(); const dir = defaultDir.clone();
         if (wpn.spread > 0) { dir.x += (Math.random() - 0.5) * wpn.spread; dir.y += (Math.random() - 0.5) * wpn.spread; dir.z += (Math.random() - 0.5) * wpn.spread; dir.normalize(); }
-        const origin = camera.getWorldPosition(new THREE.Vector3()); raycaster.set(origin, dir);
+        raycaster.set(origin, dir);
         
-        const intersects = raycaster.intersectObjects(targets, true); let endPoint = origin.clone().add(dir.clone().multiplyScalar(wpn.range));
+        const intersects = raycaster.intersectObjects(targets, true); 
+        let endPoint = origin.clone().add(dir.clone().multiplyScalar(wpn.range));
         
         if (intersects.length > 0 && intersects[0].distance <= wpn.range) {
           endPoint = intersects[0].point.clone(); let obj = intersects[0].object; while (obj.parent && obj.parent.type !== 'Scene') obj = obj.parent;
@@ -894,14 +1361,14 @@
             if (remoteId && remoteId !== localPlayerId) {
               const damage = computeDamage(wpn.damage, remoteId, wpn.id);
               sendNet({ type: 'hitPlayer', fromId: localPlayerId, targetId: remoteId, damage, hitPos: { x: origin.x, y: origin.y, z: origin.z }, meta: { weaponId: wpn.id, crouch: isCrouching } });
-              const p = otherPlayers[remoteId];
-              if (p) { p.hp = Math.max(0, p.hp - damage); updateHealthBar(p.healthBar, p.hp, 100); pulseDamageMesh(p.group.position.clone().add(new THREE.Vector3(0, 9, 0)), 0xff5555, 2.6); }
             }
           }
         }
         if (wpn.id !== 'faca') { const startPoint = new THREE.Vector3(1.5, -1, -5).applyMatrix4(camera.matrixWorld); playShotVisual(startPoint, endPoint); }
-        if (gameMode !== 'treino') sendNet({ type: 'playerShoot', id: localPlayerId, x: origin.x, y: origin.y, z: origin.z, dx: dir.x, dy: dir.y, dz: dir.z, range: wpn.range });
       }
+      
+      // OTIMIZAÇÃO: Transmite apenas 1 vez pro servidor que atirou em vez de 8!
+      if (gameMode !== 'treino') sendNet({ type: 'playerShoot', id: localPlayerId, x: origin.x, y: origin.y, z: origin.z, dx: defaultDir.x, dy: defaultDir.y, dz: defaultDir.z, range: wpn.range });
     }
 
     function handleRemoteShot(data) {
@@ -915,7 +1382,9 @@
       playerLoadout.grenadesCount--; updateAmmoUI();
       const grenade = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 0), new THREE.MeshStandardMaterial({ color: 0x27ae60 }));
       const pos = getPlayerPosition().clone(); const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
-      grenade.position.copy(pos).add(dir.clone().multiplyScalar(5)); grenade.userData.velocity = dir.clone().multiplyScalar(60).add(new THREE.Vector3(0, 26, 0)); grenade.userData.explodeTime = performance.now() + 2200; grenade.userData.ownerId = localPlayerId;
+      grenade.position.copy(pos).add(dir.clone().multiplyScalar(5));
+      grenade.userData.velocity = dir.clone().multiplyScalar(60).add(new THREE.Vector3(0, 26, 0));
+      grenade.userData.explodeTime = performance.now() + 2200; grenade.userData.ownerId = localPlayerId;
       scene.add(grenade); thrownGrenades.push(grenade);
       sendNet({ type: 'playerGrenade', id: localPlayerId, x: grenade.position.x, y: grenade.position.y, z: grenade.position.z, vx: grenade.userData.velocity.x, vy: grenade.userData.velocity.y, vz: grenade.userData.velocity.z });
       if (playerLoadout.grenadesCount <= 0) switchSlot(1);
@@ -930,186 +1399,297 @@
 
     function setAbilityCooldown(seconds = 15) {
       abilityCooldown = seconds; const el = document.getElementById('abilityInfo'); el.style.color = '#ff4655'; el.innerText = `Recarga: ${seconds}s`;
-      const interval = setInterval(() => { abilityCooldown--; if (abilityCooldown <= 0) { clearInterval(interval); el.style.color = '#00ffcc'; el.innerText = '[E] Habilidade Pronta'; return; } el.innerText = `Recarga: ${abilityCooldown}s`; }, 1000);
+      const interval = setInterval(() => {
+        abilityCooldown--; if (abilityCooldown <= 0) { clearInterval(interval); el.style.color = '#00ffcc'; el.innerText = '[E] Habilidade Pronta'; return; } el.innerText = `Recarga: ${abilityCooldown}s`;
+      }, 1000);
     }
 
-    function addSkillRef(ownerId, key, objectOrData) { if (!ownerId || !otherPlayers[ownerId]) return; otherPlayers[ownerId].skillRefs[key] = objectOrData; }
+    function addSkillRef(ownerId, key, objectOrData) {
+      if (!ownerId || !otherPlayers[ownerId]) return; otherPlayers[ownerId].skillRefs[key] = objectOrData;
+    }
 
     function applyRemoteSkill(data) {
       if (!data) return;
       if (data.skill === 'leo_flash') {
-        const flash = new THREE.Mesh(new THREE.SphereGeometry(26, 14, 14), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 })); flash.position.set(data.x, data.y, data.z); scene.add(flash); setTimeout(() => removeAndDispose(flash), 300);
-        if (data.ownerId !== localPlayerId && getPlayerPosition().distanceTo(new THREE.Vector3(data.x, data.y, data.z)) < 90) { localEffects.leoBlindUntil = nowMs() + 10000; document.getElementById('hitOverlay').style.background = 'rgba(255,255,255,.92)'; setTimeout(() => document.getElementById('hitOverlay').style.background = 'radial-gradient(circle, transparent 52%, rgba(255,0,0,.20) 100%)', 10000); }
+        const flash = new THREE.Mesh(new THREE.SphereGeometry(26, 14, 14), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 }));
+        flash.position.set(data.x, data.y, data.z); scene.add(flash); setTimeout(() => removeAndDispose(flash), 300);
+        if (data.ownerId !== localPlayerId && getPlayerPosition().distanceTo(new THREE.Vector3(data.x, data.y, data.z)) < 90) {
+          localEffects.leoBlindUntil = nowMs() + 10000; document.getElementById('hitOverlay').style.background = 'rgba(255,255,255,.92)'; setTimeout(() => document.getElementById('hitOverlay').style.background = 'radial-gradient(circle, transparent 52%, rgba(255,0,0,.20) 100%)', 10000);
+        }
       }
-      if (data.skill === 'eduarda_wall') { const wall = new THREE.Mesh(new THREE.BoxGeometry(52, 26, 8), new THREE.MeshStandardMaterial({ color: 0x9cecff, transparent: true, opacity: 0.82 })); wall.position.set(data.x, data.y, data.z); wall.rotation.y = data.ry; scene.add(wall); colliders.push(wall); addSkillRef(data.ownerId, data.skillId, wall); }
-      if (data.skill === 'gabriela_station') { const zone = new THREE.Mesh(new THREE.CylinderGeometry(26, 26, 2, 32), new THREE.MeshBasicMaterial({ color: 0x2ecc71, transparent: true, opacity: 0.25 })); zone.position.set(data.x, 1, data.z); const totem = new THREE.Mesh(new THREE.BoxGeometry(2, 7, 2), new THREE.MeshStandardMaterial({ color: 0x2ecc71 })); totem.position.set(data.x, 3.5, data.z); scene.add(zone, totem); addSkillRef(data.ownerId, data.skillId, { zone, totem, radius: 26, until: nowMs() + 10000, team: data.team }); }
-      if (data.skill === 'joao_aura') { const aura = new THREE.Mesh(new THREE.CylinderGeometry(8, 8, 24, 16), new THREE.MeshBasicMaterial({ color: 0xffd700, transparent: true, opacity: 0.25 })); scene.add(aura); addSkillRef(data.ownerId, data.skillId, { aura }); }
-      if (data.skill === 'taiana_drone') { const drone = new THREE.Mesh(new THREE.SphereGeometry(4), new THREE.MeshBasicMaterial({ color: 0x00ffff })); drone.position.set(data.x, data.y, data.z); drone.userData = { isDrone: true, hp: 50 }; scene.add(drone); addSkillRef(data.ownerId, data.skillId, { drone }); }
-      if (data.skill === 'remote_invisible') { if (otherPlayers[data.ownerId]) otherPlayers[data.ownerId].invisibleUntil = nowMs() + data.duration; }
+      if (data.skill === 'eduarda_wall') {
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(52, 26, 8), new THREE.MeshStandardMaterial({ color: 0x9cecff, transparent: true, opacity: 0.82 }));
+        wall.position.set(data.x, data.y, data.z); wall.rotation.y = data.ry; scene.add(wall); colliders.push(wall); addSkillRef(data.ownerId, data.skillId, wall);
+      }
+      if (data.skill === 'gabriela_station') {
+        const zone = new THREE.Mesh(new THREE.CylinderGeometry(26, 26, 2, 32), new THREE.MeshBasicMaterial({ color: 0x2ecc71, transparent: true, opacity: 0.25 }));
+        zone.position.set(data.x, 1, data.z);
+        const totem = new THREE.Mesh(new THREE.BoxGeometry(2, 7, 2), new THREE.MeshStandardMaterial({ color: 0x2ecc71 })); totem.position.set(data.x, 3.5, data.z);
+        scene.add(zone, totem); addSkillRef(data.ownerId, data.skillId, { zone, totem, radius: 26, until: nowMs() + 10000, team: data.team });
+      }
+      if (data.skill === 'joao_aura') {
+        const aura = new THREE.Mesh(new THREE.CylinderGeometry(8, 8, 24, 16), new THREE.MeshBasicMaterial({ color: 0xffd700, transparent: true, opacity: 0.25 })); scene.add(aura); addSkillRef(data.ownerId, data.skillId, { aura });
+      }
+      if (data.skill === 'taiana_drone') {
+        const drone = new THREE.Mesh(new THREE.SphereGeometry(4), new THREE.MeshBasicMaterial({ color: 0x00ffff })); drone.position.set(data.x, data.y, data.z); drone.userData = { isDrone: true, hp: 50 }; scene.add(drone); addSkillRef(data.ownerId, data.skillId, { drone });
+      }
+      if (data.skill === 'remote_invisible') {
+        if (otherPlayers[data.ownerId]) otherPlayers[data.ownerId].invisibleUntil = nowMs() + data.duration;
+      }
     }
 
     function removeRemoteSkill(data) {
-      const owner = otherPlayers[data.ownerId]; if (!owner || !owner.skillRefs[data.skillId]) return; const ref = owner.skillRefs[data.skillId];
+      const owner = otherPlayers[data.ownerId]; if (!owner || !owner.skillRefs[data.skillId]) return;
+      const ref = owner.skillRefs[data.skillId];
       if (ref instanceof THREE.Object3D) { removeAndDispose(ref); colliders = colliders.filter(c => c !== ref); }
-      else { if (ref.zone) removeAndDispose(ref.zone); if (ref.totem) removeAndDispose(ref.totem); if (ref.aura) removeAndDispose(ref.aura); if (ref.drone) removeAndDispose(ref.drone); if (ref.zone || ref.totem || ref.aura) colliders = colliders.filter(c => c !== ref.zone && c !== ref.totem && c !== ref.aura); }
+      else {
+        if (ref.zone) removeAndDispose(ref.zone); if (ref.totem) removeAndDispose(ref.totem); if (ref.aura) removeAndDispose(ref.aura); if (ref.drone) removeAndDispose(ref.drone);
+        if (ref.zone || ref.totem || ref.aura) colliders = colliders.filter(c => c !== ref.zone && c !== ref.totem && c !== ref.aura);
+      }
       delete owner.skillRefs[data.skillId];
     }
 
     function useAbility() {
       if (abilityCooldown > 0 || isSpectating) return;
       const pos = getPlayerPosition().clone(); const dir = new THREE.Vector3(); camera.getWorldDirection(dir); const flatDir = dir.clone().setY(0).normalize();
-      if (selectedCharId === 'brisa') { localEffects.brisaUntil = nowMs() + 8000; velocity.add(flatDir.clone().multiplyScalar(135)); velocity.y = Math.max(velocity.y, 185); setAbilityCooldown(18); }
-      else if (selectedCharId === 'eduarda') { const wall = new THREE.Mesh(new THREE.BoxGeometry(52, 26, 8), new THREE.MeshStandardMaterial({ color: 0x9cecff, transparent: true, opacity: 0.82 })); wall.position.copy(pos).add(flatDir.clone().multiplyScalar(24)); wall.position.y = 13; wall.lookAt(pos); addMapObject(wall, true); const skillId = `wall_${Date.now()}`; sendNet({ type:'skillUse', ownerId:localPlayerId, skill:'eduarda_wall', skillId, x:wall.position.x, y:wall.position.y, z:wall.position.z, ry:wall.rotation.y }); setTimeout(() => { removeMapObject(wall); sendNet({ type:'skillRemove', ownerId:localPlayerId, skillId }); }, 12000); setAbilityCooldown(18); }
-      else if (selectedCharId === 'gabriela') { const zone = new THREE.Mesh(new THREE.CylinderGeometry(26, 26, 2, 32), new THREE.MeshBasicMaterial({ color: 0x2ecc71, transparent: true, opacity: 0.25 })); zone.position.copy(pos); zone.position.y = 1; const totem = new THREE.Mesh(new THREE.BoxGeometry(2, 7, 2), new THREE.MeshStandardMaterial({ color: 0x2ecc71 })); totem.position.copy(pos); totem.position.y = 3.5; scene.add(zone, totem); const entry = { zone, totem, radius: 26, until: nowMs() + 10000, team: myTeam, position: pos.clone() }; localHealTotems.push(entry); const skillId = `heal_${Date.now()}`; sendNet({ type:'skillUse', ownerId:localPlayerId, team: myTeam, skill:'gabriela_station', skillId, x:pos.x, z:pos.z }); setTimeout(() => { removeAndDispose(zone); removeAndDispose(totem); localHealTotems = localHealTotems.filter(h => h !== entry); sendNet({ type:'skillRemove', ownerId:localPlayerId, skillId }); }, 10000); setAbilityCooldown(18); }
-      else if (selectedCharId === 'joão') { localEffects.joaoShieldUntil = nowMs() + 10000; localEffects.joaoBuffUntil = nowMs() + 30000; localEffects.joaoOneShotKnifeUntil = nowMs() + 30000; localEffects.joaoHpExpireApplied = false; playerMaxHP = 200; playerHP = Math.min(200, Math.max(playerHP + 100, 200)); playerArmor = Math.max(playerArmor, 150); updateStatusUI(); const aura = new THREE.Mesh(new THREE.CylinderGeometry(8, 8, 24, 16), new THREE.MeshBasicMaterial({ color: 0xffd700, transparent: true, opacity: 0.25 })); aura.position.copy(pos); scene.add(aura); const skillId = `joao_${Date.now()}`; otherPlayers[localPlayerId] = otherPlayers[localPlayerId] || { skillRefs: {} }; sendNet({ type:'skillUse', ownerId:localPlayerId, skill:'joao_aura', skillId }); setTimeout(() => { removeAndDispose(aura); sendNet({ type:'skillRemove', ownerId:localPlayerId, skillId }); }, 10000); setAbilityCooldown(30); }
-      else if (selectedCharId === 'leo') { const blastPos = pos.clone().add(flatDir.clone().multiplyScalar(30)); const flash = new THREE.Mesh(new THREE.SphereGeometry(26, 14, 14), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 })); flash.position.copy(blastPos); scene.add(flash); setTimeout(() => removeAndDispose(flash), 300); localEffects.leoInvisibleUntil = nowMs() + 10000; sendNet({ type:'skillUse', ownerId:localPlayerId, skill:'remote_invisible', duration:10000 }); sendNet({ type:'skillUse', ownerId:localPlayerId, skill:'leo_flash', x:blastPos.x, y:blastPos.y, z:blastPos.z }); setAbilityCooldown(20); }
-      else if (selectedCharId === 'rafa') { localEffects.rafaelRocketReady = true; localEffects.rafaelRocketUntil = nowMs() + 10000; document.getElementById('abilityInfo').innerText = '[E] Bazuca armada'; setAbilityCooldown(22); }
-      else if (selectedCharId === 'taiana') { localEffects.taianaInvisibleUntil = nowMs() + 15000; localEffects.taianaDroneUntil = nowMs() + 15000; localEffects.taianaXrayUntil = nowMs() + 15000; const drone = new THREE.Mesh(new THREE.SphereGeometry(4), new THREE.MeshBasicMaterial({ color: 0x00ffff })); drone.position.copy(pos).add(flatDir.clone().multiplyScalar(10)); drone.position.y += 40; drone.userData = { isDrone:true, hp:50 }; scene.add(drone); const skillId = `drone_${Date.now()}`; addSkillRef(localPlayerId, skillId, { drone }); sendNet({ type:'skillUse', ownerId:localPlayerId, skill:'taiana_drone', skillId, x:drone.position.x, y:drone.position.y, z:drone.position.z }); sendNet({ type:'skillUse', ownerId:localPlayerId, skill:'remote_invisible', duration:15000 }); setTimeout(() => { removeAndDispose(drone); sendNet({ type:'skillRemove', ownerId:localPlayerId, skillId }); }, 15000); setAbilityCooldown(24); }
+      if (selectedCharId === 'brisa') {
+        localEffects.brisaUntil = nowMs() + 8000;
+        velocity.add(flatDir.clone().multiplyScalar(135));
+        velocity.y = Math.max(velocity.y, 185);
+        setAbilityCooldown(18);
+      }
+      else if (selectedCharId === 'eduarda') {
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(52, 26, 8), new THREE.MeshStandardMaterial({ color: 0x9cecff, transparent: true, opacity: 0.82 }));
+        wall.position.copy(pos).add(flatDir.clone().multiplyScalar(24)); wall.position.y = 13; wall.lookAt(pos); addMapObject(wall, true);
+        const skillId = `wall_${Date.now()}`; sendNet({ type:'skillUse', ownerId:localPlayerId, skill:'eduarda_wall', skillId, x:wall.position.x, y:wall.position.y, z:wall.position.z, ry:wall.rotation.y });
+        setTimeout(() => { removeMapObject(wall); sendNet({ type:'skillRemove', ownerId:localPlayerId, skillId }); }, 12000); setAbilityCooldown(18);
+      }
+      else if (selectedCharId === 'gabriela') {
+        const zone = new THREE.Mesh(new THREE.CylinderGeometry(26, 26, 2, 32), new THREE.MeshBasicMaterial({ color: 0x2ecc71, transparent: true, opacity: 0.25 })); zone.position.copy(pos); zone.position.y = 1;
+        const totem = new THREE.Mesh(new THREE.BoxGeometry(2, 7, 2), new THREE.MeshStandardMaterial({ color: 0x2ecc71 })); totem.position.copy(pos); totem.position.y = 3.5;
+        scene.add(zone, totem); const entry = { zone, totem, radius: 26, until: nowMs() + 10000, team: myTeam, position: pos.clone() }; localHealTotems.push(entry);
+        const skillId = `heal_${Date.now()}`; sendNet({ type:'skillUse', ownerId:localPlayerId, team: myTeam, skill:'gabriela_station', skillId, x:pos.x, z:pos.z });
+        setTimeout(() => { removeAndDispose(zone); removeAndDispose(totem); localHealTotems = localHealTotems.filter(h => h !== entry); sendNet({ type:'skillRemove', ownerId:localPlayerId, skillId }); }, 10000); setAbilityCooldown(18);
+      }
+      else if (selectedCharId === 'joão') {
+        localEffects.joaoShieldUntil = nowMs() + 10000;
+        localEffects.joaoBuffUntil = nowMs() + 30000;
+        localEffects.joaoOneShotKnifeUntil = nowMs() + 30000;
+        localEffects.joaoHpExpireApplied = false;
+        playerMaxHP = 200; playerHP = Math.min(200, Math.max(playerHP + 100, 200)); playerArmor = Math.max(playerArmor, 150); updateStatusUI();
+        const aura = new THREE.Mesh(new THREE.CylinderGeometry(8, 8, 24, 16), new THREE.MeshBasicMaterial({ color: 0xffd700, transparent: true, opacity: 0.25 })); aura.position.copy(pos); scene.add(aura);
+        const skillId = `joao_${Date.now()}`; otherPlayers[localPlayerId] = otherPlayers[localPlayerId] || { skillRefs: {} }; sendNet({ type:'skillUse', ownerId:localPlayerId, skill:'joao_aura', skillId });
+        setTimeout(() => { removeAndDispose(aura); sendNet({ type:'skillRemove', ownerId:localPlayerId, skillId }); }, 10000); setAbilityCooldown(30);
+      }
+      else if (selectedCharId === 'leo') {
+        const blastPos = pos.clone().add(flatDir.clone().multiplyScalar(30));
+        const flash = new THREE.Mesh(new THREE.SphereGeometry(26, 14, 14), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 })); flash.position.copy(blastPos); scene.add(flash); setTimeout(() => removeAndDispose(flash), 300);
+        localEffects.leoInvisibleUntil = nowMs() + 10000; sendNet({ type:'skillUse', ownerId:localPlayerId, skill:'remote_invisible', duration:10000 });
+        sendNet({ type:'skillUse', ownerId:localPlayerId, skill:'leo_flash', x:blastPos.x, y:blastPos.y, z:blastPos.z }); setAbilityCooldown(20);
+      }
+      else if (selectedCharId === 'rafa') {
+        localEffects.rafaelRocketReady = true; localEffects.rafaelRocketUntil = nowMs() + 10000; document.getElementById('abilityInfo').innerText = '[E] Bazuca armada'; setAbilityCooldown(22);
+      }
+      else if (selectedCharId === 'taiana') {
+        localEffects.taianaInvisibleUntil = nowMs() + 15000; localEffects.taianaDroneUntil = nowMs() + 15000; localEffects.taianaXrayUntil = nowMs() + 15000;
+        const drone = new THREE.Mesh(new THREE.SphereGeometry(4), new THREE.MeshBasicMaterial({ color: 0x00ffff })); drone.position.copy(pos).add(flatDir.clone().multiplyScalar(10)); drone.position.y += 40; drone.userData = { isDrone:true, hp:50 }; scene.add(drone);
+        const skillId = `drone_${Date.now()}`; addSkillRef(localPlayerId, skillId, { drone }); sendNet({ type:'skillUse', ownerId:localPlayerId, skill:'taiana_drone', skillId, x:drone.position.x, y:drone.position.y, z:drone.position.z }); sendNet({ type:'skillUse', ownerId:localPlayerId, skill:'remote_invisible', duration:15000 });
+        setTimeout(() => { removeAndDispose(drone); sendNet({ type:'skillRemove', ownerId:localPlayerId, skillId }); }, 15000); setAbilityCooldown(24);
+      }
       else if (selectedCharId === 'edson') {
         const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(0, 0), camera); const hits = ray.intersectObjects(mapObjects, true);
-        if (hits.length > 0) { const targetPos = hits[0].point.clone(); targetPos.y = 1; const warn = new THREE.Mesh(new THREE.CylinderGeometry(55, 55, 2, 32), new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.35 })); warn.position.copy(targetPos); scene.add(warn); setTimeout(() => { removeAndDispose(warn); const blast = new THREE.Mesh(new THREE.SphereGeometry(55, 24, 24), new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.85 })); blast.position.copy(targetPos); scene.add(blast); setTimeout(() => removeAndDispose(blast), 500); if (isZombieMode) zombies.forEach(z => { if (!z.isDead && z.mesh.position.distanceTo(targetPos) < 65) applyDamageToZombie(z, 1000); }); if (getPlayerPosition().distanceTo(targetPos) < 65) applyDamageToLocalPlayer(150, localPlayerId, targetPos); Object.entries(otherPlayers).forEach(([id, p]) => { if (!p.isDead && p.group.position.distanceTo(targetPos) < 65) { sendNet({ type:'hitPlayer', fromId:localPlayerId, targetId:id, damage:150, hitPos:{ x:targetPos.x, y:targetPos.y, z:targetPos.z } }); p.hp = Math.max(0, p.hp - 150); updateHealthBar(p.healthBar, p.hp, 100); } }); }, 2000); setAbilityCooldown(20); }
+        if (hits.length > 0) {
+          const targetPos = hits[0].point.clone(); targetPos.y = 1;
+          const warn = new THREE.Mesh(new THREE.CylinderGeometry(55, 55, 2, 32), new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.35 })); warn.position.copy(targetPos); scene.add(warn);
+          setTimeout(() => {
+            removeAndDispose(warn); const blast = new THREE.Mesh(new THREE.SphereGeometry(55, 24, 24), new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.85 })); blast.position.copy(targetPos); scene.add(blast); setTimeout(() => removeAndDispose(blast), 500);
+            if (isZombieMode) zombies.forEach(z => { if (!z.isDead && z.mesh.position.distanceTo(targetPos) < 65) applyDamageToZombie(z, 1000); });
+            if (getPlayerPosition().distanceTo(targetPos) < 65) applyDamageToLocalPlayer(150, localPlayerId, targetPos);
+            Object.entries(otherPlayers).forEach(([id, p]) => { if (!p.isDead && p.group.position.distanceTo(targetPos) < 65) { sendNet({ type:'hitPlayer', fromId:localPlayerId, targetId:id, damage:150, hitPos:{ x:targetPos.x, y:targetPos.y, z:targetPos.z } }); p.hp = Math.max(0, p.hp - 150); updateHealthBar(p.healthBar, p.hp, 100); } });
+          }, 2000);
+          setAbilityCooldown(20);
+        }
       }
     }
 
     function fireRafaelRocket() {
-      localEffects.rafaelRocketReady = false; const rocket = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 7, 8), new THREE.MeshStandardMaterial({ color: 0x444444 })); rocket.rotation.z = Math.PI / 2; const dir = new THREE.Vector3(); camera.getWorldDirection(dir); rocket.position.copy(getPlayerPosition()).add(dir.clone().multiplyScalar(8)).add(new THREE.Vector3(0, 7, 0)); rocket.userData = { velocity: dir.clone().multiplyScalar(120), ownerId: localPlayerId, explodeAt: nowMs() + 1500, isRocket: true }; scene.add(rocket); thrownGrenades.push(rocket); sendNet({ type:'rocketFire', id:localPlayerId, x:rocket.position.x, y:rocket.position.y, z:rocket.position.z, vx:rocket.userData.velocity.x, vy:rocket.userData.velocity.y, vz:rocket.userData.velocity.z });
+      localEffects.rafaelRocketReady = false;
+      const rocket = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 7, 8), new THREE.MeshStandardMaterial({ color: 0x444444 }));
+      rocket.rotation.z = Math.PI / 2;
+      const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+      rocket.position.copy(getPlayerPosition()).add(dir.clone().multiplyScalar(8)).add(new THREE.Vector3(0, 7, 0));
+      rocket.userData = { velocity: dir.clone().multiplyScalar(120), ownerId: localPlayerId, explodeAt: nowMs() + 1500, isRocket: true };
+      scene.add(rocket); thrownGrenades.push(rocket);
+      sendNet({ type:'rocketFire', id:localPlayerId, x:rocket.position.x, y:rocket.position.y, z:rocket.position.z, vx:rocket.userData.velocity.x, vy:rocket.userData.velocity.y, vz:rocket.userData.velocity.z });
     }
 
     function spawnRemoteRocket(data) {
-      if (data.id === localPlayerId) return; const rocket = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 7, 8), new THREE.MeshStandardMaterial({ color: 0x666666 })); rocket.rotation.z = Math.PI / 2; rocket.position.set(data.x, data.y, data.z); rocket.userData = { velocity: new THREE.Vector3(data.vx, data.vy, data.vz), ownerId: data.id, explodeAt: nowMs() + 1500, isRocket: true }; scene.add(rocket); thrownGrenades.push(rocket);
+      if (data.id === localPlayerId) return;
+      const rocket = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 7, 8), new THREE.MeshStandardMaterial({ color: 0x666666 }));
+      rocket.rotation.z = Math.PI / 2; rocket.position.set(data.x, data.y, data.z); rocket.userData = { velocity: new THREE.Vector3(data.vx, data.vy, data.vz), ownerId: data.id, explodeAt: nowMs() + 1500, isRocket: true };
+      scene.add(rocket); thrownGrenades.push(rocket);
     }
 
-    // A inteligência do zumbi agora escolhe o jogador VIVO mais perto dele, independente de quem for.
-    function getNearestPlayerPosition(originPos) {
-      let nearestPos = null;
+    // --- NOVA INTELIGENCIA & SINCRONIZAÇÃO DE ZUMBIS ---
+    function startZombieWave() {
+      zombiesToSpawn = currentWave * 5; safeSetText('waveNumber', currentWave); safeSetText('zombieCount', zombiesToSpawn);
+      const interval = setInterval(() => { if (zombiesToSpawn <= 0) { clearInterval(interval); return; } spawnZombieHost(); zombiesToSpawn--; }, 1800);
+    }
+
+    function spawnZombieHost() {
+      const type = Math.floor(Math.random() * 6) + 1; // Agora vai ate 6!
+      
+      let hp, speed, scale, color, dmg;
+      if (type === 1) { hp = 60; speed = 22; scale = 1; color = 0x2ecc71; dmg = 5; } // Andarilho
+      else if (type === 2) { hp = 30; speed = 46; scale = 0.82; color = 0xe74c3c; dmg = 10; } // Corredor
+      else if (type === 3) { hp = 250; speed = 12; scale = 1.6; color = 0x8e44ad; dmg = 20; } // Tanque
+      else if (type === 4) { hp = 45; speed = 36; scale = 1; color = 0xffffff; dmg = 15; } // Fantasma
+      else if (type === 5) { hp = 1500; speed = 9; scale = 3.5; color = 0x111111; dmg = 65; } // TITÃ (O gigante)
+      else { hp = 25; speed = 40; scale = 0.5; color = 0xf1c40f; dmg = 12; } // Rastejador
+      
+      const spawn = chooseSpawnForPlayer(`z_${zombieIdCounter}_${Math.random()}`);
+      
+      const zData = {
+         id: `z${zombieIdCounter++}`, type, hp, maxHp: hp, speed, damage: dmg, scale, color, x: spawn.x, y: spawn.y, z: spawn.z
+      };
+      
+      createZombieLocal(zData); // Host cria
+      sendNet({ type: 'zombieSpawn', z: zData }); // Avisa os clientes pra criarem
+    }
+
+    // Função universal de criação
+    function createZombieLocal(zd) {
+      const tex = loadTextureSafe(`zumbi${zd.type <= 3 ? (zd.type === 1 ? '' : zd.type) : '1'}.png`);
+      const group = new THREE.Group(); 
+      const head = new THREE.Mesh(new THREE.BoxGeometry(8, 8, 8), new THREE.MeshStandardMaterial({ map: tex })); head.position.y = 4; group.add(head);
+      
+      let matConfig = { color: zd.color };
+      if(zd.type === 4) { matConfig.transparent = true; matConfig.opacity = 0.45; } // Fantasma
+      
+      const body = new THREE.Mesh(new THREE.BoxGeometry(6, 10, 6), new THREE.MeshStandardMaterial(matConfig)); body.position.y = -5; group.add(body);
+      const hpBar = makeHealthBar(8.8, 15); group.add(hpBar); group.scale.set(zd.scale, zd.scale, zd.scale);
+      
+      group.position.set(zd.x, zd.y, zd.z); scene.add(group);
+      const z = { id: zd.id, mesh: group, healthBar: hpBar, hp: zd.hp, maxHp: zd.maxHp, speed: zd.speed, damage: zd.damage, type: zd.type, isDead: false, lastAttack: 0 };
+      group.userData.isZombie = true; group.userData.zombieRef = z; zombies.push(z); updateHealthBar(hpBar, zd.hp, zd.hp);
+    }
+
+    // Busca o player vivo mais perto
+    function getClosestPlayer(zPos) {
       let minDist = Infinity;
-
-      // Testa a distância com você
+      let targetPos = null;
       if (!gameOver) {
-        nearestPos = getPlayerPosition().clone();
-        minDist = distance2D(nearestPos, originPos);
+        minDist = zPos.distanceTo(getPlayerPosition());
+        targetPos = getPlayerPosition();
       }
-
-      // Testa a distância com todos os outros jogadores vivos da sala
       Object.values(otherPlayers).forEach(p => {
         if (!p.isDead && p.group) {
-          const dist = distance2D(p.group.position, originPos);
+          const dist = zPos.distanceTo(p.group.position);
           if (dist < minDist) {
             minDist = dist;
-            nearestPos = p.group.position.clone();
+            targetPos = p.group.position.clone();
           }
         }
       });
-
-      return nearestPos || new THREE.Vector3(0, FLOOR_Y, 0);
-    }
-
-    function startZombieWave() {
-      zombiesToSpawn = currentWave * 5; safeSetText('waveNumber', currentWave); safeSetText('zombieCount', zombiesToSpawn);
-      const interval = setInterval(() => { if (zombiesToSpawn <= 0) { clearInterval(interval); return; } spawnZombie(); zombiesToSpawn--; }, 1800);
-    }
-
-    // Novo Spawn com Chefões! Se vier dados do network (syncData), ele constrói o zumbi com aquelas props
-    function spawnZombie(syncData = null) {
-      const type = syncData ? syncData.type : Math.floor(Math.random() * 8) + 1;
-      // Re-aproveitamos os pngs básicos pros novos monstros
-      const basePicId = type > 4 ? (type - 4) : type; 
-      const tex = loadTextureSafe(`zumbi${basePicId === 1 ? '' : basePicId}.png`);
-      
-      let hp, speed, scale, color, dmg, opacity = 1;
-
-      // 8 Classes Distintas de Zumbis:
-      if (type === 1) { hp = 60; speed = 22; scale = 1; color = 0x2ecc71; dmg = 5; } // Normal
-      else if (type === 2) { hp = 30; speed = 42; scale = 0.82; color = 0xe74c3c; dmg = 10; } // Corredor
-      else if (type === 3) { hp = 200; speed = 14; scale = 1.45; color = 0x8e44ad; dmg = 20; } // Tanque
-      else if (type === 4) { hp = 20; speed = 34; scale = 0.55; color = 0xf1c40f; dmg = 15; } // Rastejante
-      else if (type === 5) { hp = 600; speed = 12; scale = 2.5; color = 0x8b0000; dmg = 35; } // TITAN
-      else if (type === 6) { hp = 1500; speed = 8; scale = 3.5; color = 0x4a0404; dmg = 60; } // COLOSSUS BOSS
-      else if (type === 7) { hp = 150; speed = 32; scale = 1.2; color = 0x00ff00; dmg = 25; } // RADIOATIVO
-      else { hp = 100; speed = 48; scale = 1.0; color = 0x111111; dmg = 18; opacity = 0.45; } // SOMBRA
-
-      // Override HP with network if exists
-      if(syncData) hp = syncData.hp;
-
-      const group = new THREE.Group(); 
-      const headMat = new THREE.MeshStandardMaterial({ map: tex, transparent: opacity < 1, opacity: opacity });
-      const head = new THREE.Mesh(new THREE.BoxGeometry(8, 8, 8), headMat); head.position.y = 4; group.add(head);
-      
-      const bodyMat = new THREE.MeshStandardMaterial({ color, transparent: opacity < 1, opacity: opacity });
-      const body = new THREE.Mesh(new THREE.BoxGeometry(6, 10, 6), bodyMat); body.position.y = -5; group.add(body);
-      
-      const hpBar = makeHealthBar(8.8, 15); group.add(hpBar); group.scale.set(scale, scale, scale);
-      
-      const spawnPos = syncData ? new THREE.Vector3(syncData.x, FLOOR_Y, syncData.z) : chooseSpawnForPlayer(`z_${zombieIdCounter++}_${Math.random()}`); 
-      group.position.set(spawnPos.x, spawnPos.y, spawnPos.z); scene.add(group);
-      
-      const idStr = syncData ? syncData.id : `z${zombieIdCounter}`;
-      const z = { id: idStr, mesh: group, healthBar: hpBar, hp, maxHp: hp, speed, scale, damage: dmg, type, isDead: false, lastAttack: 0 };
-      group.userData.isZombie = true; group.userData.zombieRef = z; zombies.push(z); updateHealthBar(hpBar, hp, hp);
-      return z;
-    }
-
-    // Recebe e desenha os zumbis do host no pc dos convidados
-    function syncRemoteZombies(zDataList) {
-      zDataList.forEach(zd => {
-        let z = zombies.find(localZ => localZ.id === zd.id);
-        if (!z) {
-          z = spawnZombie(zd); // Se não existe aqui, cria!
-        } else {
-          z.mesh.position.x = zd.x;
-          z.mesh.position.z = zd.z;
-          z.hp = zd.hp;
-          updateHealthBar(z.healthBar, z.hp, z.maxHp);
-        }
-      });
-
-      // Mata os zumbis que sumiram da rede
-      const activeIds = zDataList.map(zd => zd.id);
-      zombies.forEach(z => {
-        if (!z.isDead && !activeIds.includes(z.id)) {
-          z.isDead = true; z.mesh.rotation.x = -Math.PI / 2; z.mesh.position.y = 1; updateHealthBar(z.healthBar, 0, z.maxHp);
-        }
-      });
+      return targetPos;
     }
 
     function updateStatusUI() {
       safeSetText('hpValue', Math.max(0, Math.floor(playerHP))); safeSetText('armorValue', Math.max(0, Math.floor(playerArmor)));
       if (playerHP <= 0 && !gameOver) {
         gameOver = true; isShooting = false; if (controls && controls.isLocked) controls.unlock(); document.getElementById('blocker').style.display = 'none';
-        if (gameMode === 'treino' || isZombieMode) document.getElementById('spectateBtn').style.display = 'none'; else document.getElementById('spectateBtn').style.display = 'inline-block';
+        if (gameMode === 'treino' || isZombieMode) document.getElementById('spectateBtn').style.display = 'none';
+        else document.getElementById('spectateBtn').style.display = 'inline-block';
         document.getElementById('deathMenu').style.display = 'flex'; if (netInterval) { clearInterval(netInterval); netInterval = null; }
       }
     }
 
     function setupInputs() {
       document.addEventListener('keydown', (e) => {
+        // --- CHAT SYSTEM ---
+        if (e.code === 'Enter' && !isSpectating && !gameOver && controls) {
+          const input = document.getElementById('chatInput');
+          if (document.activeElement === input) {
+            const text = input.value.trim();
+            if (text.length > 0) {
+              addChatMessage(nickname, text);
+              if (gameMode !== 'treino') sendNet({ type: 'chatMessage', sender: nickname, text });
+              input.value = '';
+            }
+            input.blur();
+            controls.lock();
+          } else {
+            controls.unlock();
+            document.getElementById('chatContainer').style.display = 'flex';
+            input.style.display = 'block';
+            setTimeout(() => input.focus(), 50);
+          }
+          return;
+        }
+
+        // Se estiver no chat, bloqueia andar/atirar
+        if (document.activeElement === document.getElementById('chatInput')) return;
+
         if (isSpectating) { if (e.code === 'KeyQ') prevSpectateTarget(); if (e.code === 'KeyE') nextSpectateTarget(); return; }
         if (!controls || !controls.isLocked || gameOver) return;
         switch (e.code) {
-          case 'KeyW': moveForward = true; break; case 'KeyS': moveBackward = true; break; case 'KeyA': moveLeft = true; break; case 'KeyD': moveRight = true; break;
-          case 'ShiftLeft': isSprinting = true; break; case 'KeyQ': isCrouching = true; break;
-          case 'Space': if (canJump) { velocity.y = getJumpPower(); getPlayerPosition().y += 0.15; canJump = false; } break;
-          case 'KeyR': reloadWeapon(); break; case 'Digit1': switchSlot(1); break; case 'Digit2': switchSlot(2); break; case 'Digit3': switchSlot(3); break;
-          case 'KeyE': useAbility(); break; case 'KeyF': if (isZombieMode) toggleFlashlight(); break;
+          case 'KeyW': moveForward = true; break;
+          case 'KeyS': moveBackward = true; break;
+          case 'KeyA': moveLeft = true; break;
+          case 'KeyD': moveRight = true; break;
+          case 'ShiftLeft': isSprinting = true; break;
+          case 'KeyQ': isCrouching = true; break;
+          case 'Space':
+            if (canJump) {
+              velocity.y = getJumpPower();
+              getPlayerPosition().y += 0.15;
+              canJump = false;
+            }
+            break;
+          case 'KeyR': reloadWeapon(); break;
+          case 'Digit1': switchSlot(1); break;
+          case 'Digit2': switchSlot(2); break;
+          case 'Digit3': switchSlot(3); break;
+          case 'KeyE': useAbility(); break;
+          case 'KeyF': if (isZombieMode) toggleFlashlight(); break;
         }
       });
       document.addEventListener('keyup', (e) => {
-        switch (e.code) { case 'KeyW': moveForward = false; break; case 'KeyS': moveBackward = false; break; case 'KeyA': moveLeft = false; break; case 'KeyD': moveRight = false; break; case 'ShiftLeft': isSprinting = false; break; case 'KeyQ': isCrouching = false; break; }
+        switch (e.code) {
+          case 'KeyW': moveForward = false; break; case 'KeyS': moveBackward = false; break; case 'KeyA': moveLeft = false; break; case 'KeyD': moveRight = false; break; case 'ShiftLeft': isSprinting = false; break; case 'KeyQ': isCrouching = false; break;
+        }
       });
       document.addEventListener('wheel', (e) => {
         if (!controls || !controls.isLocked || gameOver || isSpectating) return;
-        let next = playerLoadout.currentSlot; if (e.deltaY > 0) { next++; if (next > 3) next = 1; if (next === 3 && playerLoadout.grenadesCount <= 0) next = 1; } else { next--; if (next < 1) next = playerLoadout.grenadesCount > 0 ? 3 : 2; } switchSlot(next);
+        let next = playerLoadout.currentSlot;
+        if (e.deltaY > 0) { next++; if (next > 3) next = 1; if (next === 3 && playerLoadout.grenadesCount <= 0) next = 1; }
+        else { next--; if (next < 1) next = playerLoadout.grenadesCount > 0 ? 3 : 2; }
+        switchSlot(next);
       });
       document.addEventListener('mousedown', (e) => {
         if (!controls || !controls.isLocked || gameOver || isSpectating) return;
-        if (e.button === 0) { if (selectedCharId === 'rafa' && localEffects.rafaelRocketReady) { fireRafaelRocket(); return; } const wpn = playerLoadout.currentSlot === 1 ? playerLoadout.primary : playerLoadout.currentSlot === 2 ? playerLoadout.melee : playerLoadout.grenade; if (wpn.isAuto) isShooting = true; else shoot(); } else if (e.button === 2) toggleScope();
+        if (document.activeElement === document.getElementById('chatInput')) return;
+
+        if (e.button === 0) {
+          if (selectedCharId === 'rafa' && localEffects.rafaelRocketReady) { fireRafaelRocket(); return; }
+          const wpn = playerLoadout.currentSlot === 1 ? playerLoadout.primary : playerLoadout.currentSlot === 2 ? playerLoadout.melee : playerLoadout.grenade;
+          if (wpn.isAuto) isShooting = true; else shoot();
+        } else if (e.button === 2) toggleScope();
       });
-      document.addEventListener('mouseup', (e) => { if (e.button === 0) isShooting = false; }); document.addEventListener('contextmenu', e => e.preventDefault());
+      document.addEventListener('mouseup', (e) => { if (e.button === 0) isShooting = false; });
+      document.addEventListener('contextmenu', e => e.preventDefault());
     }
 
-    function setupFlashlight() { if (!isZombieMode) return; flashlightTarget = new THREE.Object3D(); scene.add(flashlightTarget); flashlight = new THREE.SpotLight(0xffffff, 11, 320, Math.PI / 7, 0.22, 1.2); flashlight.position.set(0, 0, 0); flashlight.target = flashlightTarget; camera.add(flashlight); flashlight.visible = true; flashlightOn = true; }
+    function setupFlashlight() {
+      if (!isZombieMode) return;
+      flashlightTarget = new THREE.Object3D(); scene.add(flashlightTarget);
+      flashlight = new THREE.SpotLight(0xffffff, 11, 320, Math.PI / 7, 0.22, 1.2); flashlight.position.set(0, 0, 0); flashlight.target = flashlightTarget; camera.add(flashlight); flashlight.visible = true; flashlightOn = true;
+    }
     function toggleFlashlight() { if (!flashlight) return; flashlightOn = !flashlightOn; flashlight.visible = flashlightOn; }
-    function updateFlashlight() { if (!flashlight || !flashlightTarget) return; const pos = camera.getWorldPosition(new THREE.Vector3()); const dir = camera.getWorldDirection(new THREE.Vector3()); flashlightTarget.position.copy(pos.clone().add(dir.multiplyScalar(80))); flashlight.visible = flashlightOn; }
+    function updateFlashlight() {
+      if (!flashlight || !flashlightTarget) return;
+      const pos = camera.getWorldPosition(new THREE.Vector3()); const dir = camera.getWorldDirection(new THREE.Vector3()); flashlightTarget.position.copy(pos.clone().add(dir.multiplyScalar(80))); flashlight.visible = flashlightOn;
+    }
 
     function startNetworkingLoop() {
       if (gameMode === 'treino') return; if (netInterval) clearInterval(netInterval);
@@ -1118,22 +1698,32 @@
         const pos = getPlayerPosition();
         sendNet({ type: 'playerUpdate', id: localPlayerId, nickname, team: myTeam, charId: selectedCharId, x: pos.x, y: pos.y, z: pos.z, rot: camera.rotation.y, hp: playerHP, isDead: gameOver });
         
-        // Host sincroniza a vida e posição dos zumbis com todos da sala
+        // Host sincroniza posições dos zumbis para ninguém ver bicho voando/invisível
         if (isHost && isZombieMode) {
-          const zSync = zombies.filter(z => !z.isDead).map(z => ({ id: z.id, type: z.type, x: z.mesh.position.x, z: z.mesh.position.z, hp: z.hp }));
-          sendNet({ type: 'zombieSync', zombies: zSync });
+           const zData = zombies.filter(z => !z.isDead).map(z => {
+              const dir = new THREE.Vector3(); z.mesh.getWorldDirection(dir);
+              return { i: z.id, x: z.mesh.position.x, y: z.mesh.position.y, z: z.mesh.position.z, h: z.hp, tx: z.mesh.position.x + dir.x, tz: z.mesh.position.z + dir.z }
+           });
+           if(zData.length > 0) sendNet({ type: 'zombiesSync', zs: zData });
         }
       }, NET_RATE_MS);
     }
 
-    function buildSpectateTargets() { spectateTargets = Object.values(otherPlayers).filter(p => { if (p.isDead) return false; if (isTeamMode) return p.team === myTeam; return true; }); spectateIndex = 0; }
-    function startSpectating() { buildSpectateTargets(); if (spectateTargets.length === 0) { alert('Não há jogadores válidos para espectar agora.'); return; } isSpectating = true; document.getElementById('spectatorHUD').style.display = 'block'; document.getElementById('crosshair').style.display = 'none'; document.getElementById('sniperScope').style.display = 'none'; applySpectateTarget(); }
+    function buildSpectateTargets() {
+      spectateTargets = Object.values(otherPlayers).filter(p => { if (p.isDead) return false; if (isTeamMode) return p.team === myTeam; return true; }); spectateIndex = 0;
+    }
+    function startSpectating() {
+      buildSpectateTargets(); if (spectateTargets.length === 0) { alert('Não há jogadores válidos para espectar agora.'); return; }
+      isSpectating = true; document.getElementById('spectatorHUD').style.display = 'block'; document.getElementById('crosshair').style.display = 'none'; document.getElementById('sniperScope').style.display = 'none'; applySpectateTarget();
+    }
     function applySpectateTarget() { if (!isSpectating || spectateTargets.length === 0) return; const t = spectateTargets[spectateIndex]; safeSetText('spectatorName', t.nickname || 'Jogador'); }
     function nextSpectateTarget() { buildSpectateTargets(); if (spectateTargets.length === 0) return; spectateIndex = (spectateIndex + 1) % spectateTargets.length; applySpectateTarget(); }
     function prevSpectateTarget() { buildSpectateTargets(); if (spectateTargets.length === 0) return; spectateIndex = (spectateIndex - 1 + spectateTargets.length) % spectateTargets.length; applySpectateTarget(); }
     function updateSpectatorCamera(delta) {
-      if (!isSpectating || spectateTargets.length === 0) return; const t = spectateTargets[spectateIndex]; if (!t || !t.group || !scene.children.includes(t.group)) { buildSpectateTargets(); if (!spectateTargets.length) return; applySpectateTarget(); return; }
-      const targetPos = t.group.position.clone(); const offset = new THREE.Vector3(0, 22, 28); offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), t.group.rotation.y); const desired = targetPos.clone().add(offset); camera.position.lerp(desired, Math.min(1, delta * 5)); camera.lookAt(targetPos.clone().add(new THREE.Vector3(0, 8, 0)));
+      if (!isSpectating || spectateTargets.length === 0) return;
+      const t = spectateTargets[spectateIndex]; if (!t || !t.group || !scene.children.includes(t.group)) { buildSpectateTargets(); if (!spectateTargets.length) return; applySpectateTarget(); return; }
+      const targetPos = t.group.position.clone(); const offset = new THREE.Vector3(0, 22, 28); offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), t.group.rotation.y);
+      const desired = targetPos.clone().add(offset); camera.position.lerp(desired, Math.min(1, delta * 5)); camera.lookAt(targetPos.clone().add(new THREE.Vector3(0, 8, 0)));
     }
 
     function getCurrentMoveSpeed() {
@@ -1141,19 +1731,20 @@
       if (selectedCharId === 'brisa' && localEffects.brisaUntil > nowMs()) { walk = 66; sprint = 96; crouch = 42; }
       if (selectedCharId === 'joão' && localEffects.joaoBuffUntil > nowMs()) { walk += 10; sprint += 12; crouch += 6; }
       if (playerLoadout.currentSlot === 1 && playerLoadout.primary.id === 'minigun') { walk *= 0.7; sprint *= 0.7; crouch *= 0.7; }
-      if (isCrouching) return crouch; return isSprinting ? sprint : walk;
+      if (isCrouching) return crouch;
+      return isSprinting ? sprint : walk;
     }
 
-    function getJumpPower() { let jump = DEFAULT_MOVE.jump; if (selectedCharId === 'brisa' && localEffects.brisaUntil > nowMs()) jump = 235; if (selectedCharId === 'joão' && localEffects.joaoBuffUntil > nowMs()) jump = 215; return jump; }
+    function getJumpPower() {
+      let jump = DEFAULT_MOVE.jump;
+      if (selectedCharId === 'brisa' && localEffects.brisaUntil > nowMs()) jump = 235;
+      if (selectedCharId === 'joão' && localEffects.joaoBuffUntil > nowMs()) jump = 215;
+      return jump;
+    }
 
     function confirmRemoveItem(itemId) {
       const idx = itemsOnGround.findIndex(i => i.id === itemId);
       if (idx >= 0) { removeAndDispose(itemsOnGround[idx].mesh); itemsOnGround.splice(idx, 1); }
-      // Remove do mapa base para que quem entrar na sala depois não veja itens fantasmas
-      if (worldSnapshot && worldSnapshot.items) {
-        const snapIdx = worldSnapshot.items.findIndex(i => i.id === itemId);
-        if (snapIdx >= 0) worldSnapshot.items.splice(snapIdx, 1);
-      }
     }
 
     function spawnDroppedWeapon(weaponId, pos, dropId = `drop_${Date.now()}_${Math.random()}`) {
@@ -1169,16 +1760,24 @@
       if (isSpectating) { updateSpectatorCamera(delta); renderer.render(scene, camera); prevTime = now; return; }
       if (!controls || !controls.isLocked || gameOver) { renderer.render(scene, camera); prevTime = now; return; }
 
-      if (isShooting && playerLoadout.currentSlot !== 3) { const wpn = playerLoadout.currentSlot === 1 ? playerLoadout.primary : playerLoadout.melee; if (wpn.isAuto) shoot(); }
+      if (isShooting && playerLoadout.currentSlot !== 3) {
+        const wpn = playerLoadout.currentSlot === 1 ? playerLoadout.primary : playerLoadout.melee; if (wpn.isAuto) shoot();
+      }
 
-      if (selectedCharId === 'joão' && localEffects.joaoBuffUntil > 0 && now > localEffects.joaoBuffUntil && !localEffects.joaoHpExpireApplied) { localEffects.joaoHpExpireApplied = true; playerMaxHP = 100; playerHP = Math.min(playerHP, 100); playerArmor = Math.min(playerArmor, 75); updateStatusUI(); }
+      if (selectedCharId === 'joão' && localEffects.joaoBuffUntil > 0 && now > localEffects.joaoBuffUntil && !localEffects.joaoHpExpireApplied) {
+        localEffects.joaoHpExpireApplied = true; playerMaxHP = 100; playerHP = Math.min(playerHP, 100); playerArmor = Math.min(playerArmor, 75); updateStatusUI();
+      }
 
       velocity.x = 0; velocity.z = 0;
-      _moveVec.set(0, 0, 0); if (moveForward) _moveVec.z -= 1; if (moveBackward) _moveVec.z += 1; if (moveLeft) _moveVec.x -= 1; if (moveRight) _moveVec.x += 1; _moveVec.normalize();
-      const speed = getCurrentMoveSpeed(); const wasOnGround = getPlayerPosition().y <= FLOOR_Y + 0.001;
+      
+      _moveVec.set(0, 0, 0);
+      if (moveForward) _moveVec.z -= 1; if (moveBackward) _moveVec.z += 1; if (moveLeft) _moveVec.x -= 1; if (moveRight) _moveVec.x += 1; _moveVec.normalize();
+      const speed = getCurrentMoveSpeed();
+      const wasOnGround = getPlayerPosition().y <= FLOOR_Y + 0.001;
       
       if (_moveVec.lengthSq() > 0) {
-        camera.getWorldDirection(_forwardVec); _forwardVec.y = 0; _forwardVec.normalize(); _rightVec.crossVectors(_forwardVec, new THREE.Vector3(0, 1, 0)).normalize();
+        camera.getWorldDirection(_forwardVec); _forwardVec.y = 0; _forwardVec.normalize();
+        _rightVec.crossVectors(_forwardVec, new THREE.Vector3(0, 1, 0)).normalize();
         _wishVec.set(0, 0, 0).add(_forwardVec.multiplyScalar(-_moveVec.z)).add(_rightVec.multiplyScalar(_moveVec.x)).normalize().multiplyScalar(speed * delta);
         velocity.x = _wishVec.x; velocity.z = _wishVec.z;
       }
@@ -1197,16 +1796,23 @@
 
       if (localHealTotems.length > 0) {
         localHealTotems = localHealTotems.filter(t => now < t.until);
-        localHealTotems.forEach(z => { const sameTeam = !isTeamMode || z.team === myTeam; if (sameTeam && distance2D(getPlayerPosition(), z.position) < z.radius) { playerHP = Math.min(playerMaxHP, playerHP + 18 * delta); updateStatusUI(); } });
+        localHealTotems.forEach(z => {
+          const sameTeam = !isTeamMode || z.team === myTeam;
+          if (sameTeam && distance2D(getPlayerPosition(), z.position) < z.radius) { playerHP = Math.min(playerMaxHP, playerHP + 18 * delta); updateStatusUI(); }
+        });
       }
 
       for (let i = thrownGrenades.length - 1; i >= 0; i--) {
-        const g = thrownGrenades[i]; g.position.add(g.userData.velocity.clone().multiplyScalar(delta));
+        const g = thrownGrenades[i];
+        g.position.add(g.userData.velocity.clone().multiplyScalar(delta));
         if (!g.userData.isRocket) g.userData.velocity.y -= 26 * delta;
         if (!g.userData.isRocket && g.position.y <= 3) { g.position.y = 3; g.userData.velocity.x *= 0.55; g.userData.velocity.z *= 0.55; g.userData.velocity.y *= -0.15; }
         if (now > (g.userData.explodeTime || g.userData.explodeAt)) {
-          const radius = g.userData.isRocket ? 70 : 40; const damage = g.userData.isRocket ? 240 : 100; const color = g.userData.isRocket ? 0xffaa00 : 0xff4655;
-          const expl = new THREE.Mesh(new THREE.SphereGeometry(g.userData.isRocket ? 55 : 35, 16, 16), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.82 })); expl.position.copy(g.position); scene.add(expl); setTimeout(() => removeAndDispose(expl), 320);
+          const radius = g.userData.isRocket ? 70 : 40;
+          const damage = g.userData.isRocket ? 240 : 100;
+          const color = g.userData.isRocket ? 0xffaa00 : 0xff4655;
+          const expl = new THREE.Mesh(new THREE.SphereGeometry(g.userData.isRocket ? 55 : 35, 16, 16), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.82 }));
+          expl.position.copy(g.position); scene.add(expl); setTimeout(() => removeAndDispose(expl), 320);
           if (isZombieMode) zombies.forEach(z => { if (!z.isDead && z.mesh.position.distanceTo(g.position) < radius) applyDamageToZombie(z, g.userData.isRocket ? 400 : 150); });
           Object.entries(otherPlayers).forEach(([id, p]) => { if (!p.isDead && p.group.position.distanceTo(g.position) < radius && g.userData.ownerId === localPlayerId) { sendNet({ type:'hitPlayer', fromId:localPlayerId, targetId:id, damage, hitPos:{ x:g.position.x, y:g.position.y, z:g.position.z } }); p.hp = Math.max(0, p.hp - damage); updateHealthBar(p.healthBar, p.hp, 100); pulseDamageMesh(p.group.position.clone().add(new THREE.Vector3(0, 9, 0))); } });
           if (g.userData.ownerId !== localPlayerId && getPlayerPosition().distanceTo(g.position) < radius && !gameOver) applyDamageToLocalPlayer(damage, g.userData.ownerId, g.position);
@@ -1216,52 +1822,59 @@
 
       for (let i = itemsOnGround.length - 1; i >= 0; i--) {
         const item = itemsOnGround[i];
-        if (item.type === 'weapon') item.mesh.rotation.y += 0.02; item.mesh.position.y = item.y + 1.5 + Math.sin(now / 200) * 0.5;
-        // Qualquer um agora pode pegar itens! Retirado o bloqueio if(isHost)
-        if (distance2D(getPlayerPosition(), item.mesh.position) < 14) {
+        
+        if (item.type === 'weapon') item.mesh.rotation.y += 0.02; 
+        item.mesh.position.y = item.y + 1.5 + Math.sin(now / 200) * 0.5;
+        
+        // FIX: Removemos a trava isHost daqui. QUALQUER UM PODE PEGAR AGORA!
+        if (distance2D(getPlayerPosition(), item.mesh.position) < 16) {
           if (item.type === 'ammo') { playerLoadout.primary.reserveAmmo = Math.min(playerLoadout.primary.maxReserve, playerLoadout.primary.reserveAmmo + item.amount); if (playerLoadout.currentSlot === 1) updateAmmoUI(); }
           else if (item.type === 'cura') { playerHP = Math.min(playerMaxHP, playerHP + item.amount); updateStatusUI(); }
           else if (item.type === 'granada') { playerLoadout.grenadesCount += item.amount; updateAmmoUI(); }
           else if (item.type === 'weapon') {
-            const currentWpnId = playerLoadout.primary.id; const dropPos = getPlayerPosition().clone(); camera.getWorldDirection(_camDirVec); _camDirVec.y = 0; _camDirVec.normalize(); dropPos.add(_camDirVec.multiplyScalar(10)); dropPos.y = 3;
+            const currentWpnId = playerLoadout.primary.id; 
+            const dropPos = getPlayerPosition().clone(); 
+            camera.getWorldDirection(_camDirVec); _camDirVec.y = 0; _camDirVec.normalize(); 
+            dropPos.add(_camDirVec.multiplyScalar(10)); dropPos.y = 3;
             if (gameMode !== 'treino') { const dropId = `drop_${Date.now()}`; sendNet({ type:'dropWeapon', weaponId:currentWpnId, x:dropPos.x, y:dropPos.y, z:dropPos.z, dropId }); }
             else spawnDroppedWeapon(currentWpnId, dropPos);
             playerLoadout.primary = { ...WEAPONS[item.weaponId], currentAmmo: WEAPONS[item.weaponId].maxAmmo, reserveAmmo: WEAPONS[item.weaponId].maxReserve, model: createWeaponModel(item.weaponId) };
             if (playerLoadout.currentSlot === 1) switchSlot(1);
           }
           const itemId = item.id; removeAndDispose(item.mesh); itemsOnGround.splice(i, 1); 
-          if (gameMode !== 'treino') sendNet({ type:'pickupItem', itemId });
+          if (gameMode !== 'treino') sendNet({ type:'pickupItem', itemId }); // Fala pra galera remover tb!
         }
       }
 
-      if (isZombieMode) {
+      // IA DO ZUMBI
+      if (isZombieMode && isHost) {
         let alive = 0;
         zombies.forEach(z => {
           if (z.isDead) return; alive++;
           
-          // LÓGICA DE INTELIGÊNCIA ARTIFICIAL ATUALIZADA (Só roda no host, mas afeta geral)
-          if (isHost || gameMode === 'treino') {
-            const alvo = getNearestPlayerPosition(z.mesh.position);
-            const dir = new THREE.Vector3().subVectors(alvo, z.mesh.position); dir.y = 0; dir.normalize(); 
-            z.mesh.position.add(dir.multiplyScalar(z.speed * delta)); 
-            z.mesh.lookAt(alvo.x, z.mesh.position.y, alvo.z);
-          }
+          const targetPos = getClosestPlayer(z.mesh.position);
+          if(!targetPos) return;
+
+          const dir = new THREE.Vector3().subVectors(targetPos, z.mesh.position); dir.y = 0; dir.normalize(); 
+          z.mesh.position.add(dir.multiplyScalar(z.speed * delta)); 
+          z.mesh.lookAt(targetPos.x, z.mesh.position.y, targetPos.z);
           
-          // Todo PC processa se tomou soco do zumbi independentemente
-          const pPos = getPlayerPosition(); 
-          const hitRange = 15 * (z.scale / 1.45); // Zumbis grandes tem braços maiores
-          if (z.mesh.position.distanceTo(pPos) < hitRange && now - z.lastAttack > 1000) { 
-            z.lastAttack = now; applyDamageToLocalPlayer(z.damage, z.id, z.mesh.position); 
+          if (z.mesh.position.distanceTo(targetPos) < (15 * z.mesh.scale.x) && now - z.lastAttack > 1000) { 
+             z.lastAttack = now;
+             if (targetPos.equals(getPlayerPosition())) {
+                 applyDamageToLocalPlayer(z.damage, z.id, z.mesh.position);
+             } else {
+                 // Descobre quem ele bateu e manda aplicar dano pela rede
+                 Object.values(otherPlayers).forEach(p => {
+                    if (p.group.position.equals(targetPos)) {
+                        sendNet({ type: 'hitPlayer', fromId: z.id, targetId: p.id, damage: z.damage });
+                        p.hp -= z.damage; updateHealthBar(p.healthBar, p.hp, 100);
+                    }
+                 });
+             }
           }
         });
-
-        if (alive === 0 && zombiesToSpawn === 0 && zombies.length > 0 && isHost) { 
-          currentWave++; 
-          // Otimização final: limpa os mortos antes da próxima horda
-          zombies.forEach(z => removeAndDispose(z.mesh));
-          zombies = []; 
-          setTimeout(() => startZombieWave(), 2600); 
-        }
+        if (alive === 0 && zombiesToSpawn === 0 && zombies.length > 0 && isHost) { currentWave++; zombies = []; setTimeout(() => startZombieWave(), 2600); }
       }
 
       renderer.render(scene, camera); prevTime = now;
