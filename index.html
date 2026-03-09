@@ -98,7 +98,7 @@
     #chatContainer {
       position: absolute; left: 26px; top: 100px; z-index: 100;
       display: none; flex-direction: column; width: 320px;
-      pointer-events: none; /* Deixa os cliques passarem pro jogo, exceto no input */
+      pointer-events: none;
     }
     #chatMessages {
       height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
@@ -112,7 +112,7 @@
     }
     .chat-msg span.name { color: #00ffcc; margin-right: 5px; }
     #chatInput {
-      pointer-events: auto; /* Permite clicar e digitar */
+      pointer-events: auto;
       background: rgba(0, 0, 0, 0.8); border: 2px solid #ff4655;
       color: #fff; padding: 10px; border-radius: 8px; font-family: 'Rajdhani';
       font-size: 1rem; outline: none; display: none;
@@ -264,7 +264,7 @@
     <div id="playerInfo">
       <h2 id="hudPlayerName">---</h2>
       <div class="status-bar">
-        <span class="hp-text">HP: <span id="hpValue">100</span></span>
+        <span class="hp-text">HP: <span id="hpValue">250</span></span>
         <span class="armor-text">ARMOR: <span id="armorValue">0</span></span>
       </div>
       <div id="abilityInfo">[E] Habilidade Pronta</div>
@@ -373,7 +373,7 @@
     import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 
     const ROOM_PREFIX = 'senaistrike-';
-    const NET_RATE_MS = 60;
+    const NET_RATE_MS = 85; // OTIMIZAÇÃO: Menos spam de rede para o Host
     const PLAYER_HEIGHT = 18;
     const PLAYER_RADIUS = 2.2;
     const PLAYER_HALF_HEIGHT = PLAYER_HEIGHT / 2;
@@ -399,6 +399,7 @@
       fuzil: { id:'fuzil', name:'Vandal', damage:26, fireRate:0.12, maxAmmo:25, maxReserve:75, range:260, color:0x111111, isAuto:true, pellets:1, spread:0.012 },
       sniper: { id:'sniper', name:'Operator', damage:95, fireRate:1.5, maxAmmo:5, maxReserve:15, range:520, color:0x27ae60, isAuto:false, scoped:true, pellets:1, spread:0 },
       minigun: { id:'minigun', name:'Minigun', damage:18, fireRate:0.055, maxAmmo:100, maxReserve:200, range:320, color:0x1c1c1c, isAuto:true, pellets:1, spread:0.05 },
+      bazuca: { id:'bazuca', name:'Bazuca', damage:800, fireRate:2.5, maxAmmo:1, maxReserve:10, range:1000, color:0x3c4a2a, isAuto:false, pellets:1, spread:0, isProjectile: true },
       faca: { id:'faca', name:'Faca Tática', damage:55, fireRate:0.5, maxAmmo:Infinity, maxReserve:Infinity, range:10, color:0xaaaaaa, isAuto:false, pellets:1, spread:0 },
       granada: { id:'granada', name:'Granada Frag', damage:80, fireRate:1.0, maxAmmo:1, maxReserve:0, range:50, color:0x27ae60, isAuto:false, pellets:1, spread:0 }
     };
@@ -414,7 +415,6 @@
     let scene, camera, renderer, controls;
     let prevTime = performance.now();
 
-    // VETORES PRÉ-ALOCADOS (Otimização para parar de gerar lixo no animate)
     const _moveVec = new THREE.Vector3();
     const _forwardVec = new THREE.Vector3();
     const _rightVec = new THREE.Vector3();
@@ -438,9 +438,10 @@
     let flashlightOn = true;
 
     let playerLoadout = { primary:null, melee:null, grenade:null, currentSlot:1, grenadesCount:0 };
-    let playerHP = 160;
+    // MUDANÇA: HP PADRÃO PARA 250
+    let playerHP = 250;
     let playerArmor = 0;
-    let playerMaxHP = 160;
+    let playerMaxHP = 250;
     let abilityCooldown = 0;
     let isScoped = false;
     let isShooting = false;
@@ -502,7 +503,6 @@
       startMatchBtn: document.getElementById('startMatchBtn')
     };
 
-    // FUNÇÕES DE LIXEIRO DA PLACA DE VÍDEO (Evita travamentos do host por vazamento de memória)
     function removeAndDispose(obj) {
       if (!obj) return;
       if (scene) scene.remove(obj);
@@ -706,7 +706,7 @@
 
       const mapS = isZombieMode ? 480 : 450;
       const itemTypes = ['ammo','cura','granada','weapon'];
-      const weaponTypes = ['pistola','shotgun','fuzil','sniper','minigun'];
+      const weaponTypes = ['pistola','shotgun','fuzil','sniper','minigun','bazuca']; // Bazuca no drop
       const itemCount = isZombieMode ? 80 : 48;
       for (let i = 0; i < itemCount; i++) {
         const type = itemTypes[Math.floor(rand() * itemTypes.length)];
@@ -932,23 +932,22 @@
           if (data.targetId === localPlayerId && !gameOver) {
             applyDamageToLocalPlayer(data.damage, data.fromId, data.hitPos || null, data.meta || null);
           } else if (otherPlayers[data.targetId]) {
-            // Update the health bar for everyone else so they see the damage rolando
             const p = otherPlayers[data.targetId];
             p.hp = Math.max(0, p.hp - data.damage);
-            updateHealthBar(p.healthBar, p.hp, 100);
+            updateHealthBar(p.healthBar, p.hp, p.maxHp || 250);
             pulseDamageMesh(p.group.position.clone().add(new THREE.Vector3(0, 9, 0)), 0xff5555, 2.6);
           }
           break;
         }
         case 'playerGrenade': spawnRemoteGrenade(data); break;
-        case 'playerDead': if (otherPlayers[data.id]) { otherPlayers[data.id].isDead = true; otherPlayers[data.id].group.rotation.x = -Math.PI / 2; updateHealthBar(otherPlayers[data.id].healthBar, 0, 100); } break;
+        case 'playerDead': if (otherPlayers[data.id]) { otherPlayers[data.id].isDead = true; otherPlayers[data.id].group.rotation.x = -Math.PI / 2; updateHealthBar(otherPlayers[data.id].healthBar, 0, 250); } break;
         case 'skillUse': applyRemoteSkill(data); break;
         case 'skillRemove': removeRemoteSkill(data); break;
         case 'rocketFire': spawnRemoteRocket(data); break;
         case 'pickupItem': confirmRemoveItem(data.itemId); break;
         case 'dropWeapon': spawnDroppedWeapon(data.weaponId, new THREE.Vector3(data.x, data.y, data.z), data.dropId); break;
         
-        // --- ZUMBI NETWORK (O SEGREDO DO SYNC!) ---
+        // --- ZUMBI NETWORK OTMIZADO ---
         case 'zombieSpawn':
           createZombieLocal(data.z);
           break;
@@ -959,7 +958,6 @@
                 z.mesh.position.x = zd.x;
                 z.mesh.position.y = zd.y;
                 z.mesh.position.z = zd.z;
-                // Vira para quem está atacando (opcional visual)
                 if (zd.tx !== undefined && zd.tz !== undefined) {
                     z.mesh.lookAt(zd.tx, z.mesh.position.y, zd.tz);
                 }
@@ -987,10 +985,9 @@
       messages.appendChild(el);
       messages.scrollTop = messages.scrollHeight;
 
-      // Oculta depois de um tempo se não tiver focado
       setTimeout(() => {
         if (document.activeElement !== document.getElementById('chatInput')) {
-          // container.style.display = 'none'; // Descomente pra fazer o chat sumir sozinho
+          // container.style.display = 'none';
         }
       }, 8000);
     }
@@ -1044,7 +1041,8 @@
         charId: data.charId,
         group: new THREE.Group(),
         healthBar: null,
-        hp: 100,
+        hp: 250,
+        maxHp: 250,
         isDead: false,
         invisibleUntil: 0,
         skillRefs: {}
@@ -1064,7 +1062,7 @@
       if (!p || !p.group) return;
       p.nickname = data.nickname ?? p.nickname; p.team = data.team ?? p.team; p.hp = typeof data.hp === 'number' ? data.hp : p.hp; p.isDead = !!data.isDead;
       p.group.position.set(data.x, data.y - 10, data.z); p.group.rotation.y = data.rot; p.group.visible = nowMs() > (p.invisibleUntil || 0);
-      updateHealthBar(p.healthBar, p.hp, 100);
+      updateHealthBar(p.healthBar, p.hp, p.maxHp || 250);
     }
 
     function bootGameDirectly() {
@@ -1188,7 +1186,7 @@
     function createWeaponModel(weaponId) {
       const group = new THREE.Group();
       const matDark = new THREE.MeshStandardMaterial({ color: 0x111111 });
-      const matMain = new THREE.MeshStandardMaterial({ color: WEAPONS[weaponId].color });
+      const matMain = new THREE.MeshStandardMaterial({ color: WEAPONS[weaponId] ? WEAPONS[weaponId].color : 0x555555 });
       let mesh, barrel, mag;
       switch (weaponId) {
         case 'faca': {
@@ -1204,6 +1202,13 @@
         case 'sniper': mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1.5, 8), new THREE.MeshStandardMaterial({ color: 0x1f3b2b })); barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 6), matDark); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0, -6); mesh.add(barrel); { const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 3), matDark); scope.rotation.x = Math.PI / 2; scope.position.set(0, 1.2, -1); mesh.add(scope); } mesh.position.set(1.5, -2, -5); group.add(mesh); break;
         case 'shotgun': mesh = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 5), matMain); barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 4), matDark); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0, -4); mesh.add(barrel); mesh.position.set(1.5, -2, -4); group.add(mesh); break;
         case 'minigun': mesh = new THREE.Group(); { const mainBody = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 4), matDark); mainBody.rotation.x = Math.PI / 2; mesh.add(mainBody); for (let i = 0; i < 6; i++) { const b = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 5), new THREE.MeshStandardMaterial({ color: 0x333333 })); b.rotation.x = Math.PI / 2; b.position.set(Math.cos(i * Math.PI / 3) * 0.6, Math.sin(i * Math.PI / 3) * 0.6, -2); mesh.add(b); } const handle = new THREE.Mesh(new THREE.BoxGeometry(0.5, 2, 1), matDark); handle.position.set(0, 1, 1); mesh.add(handle);} mesh.position.set(2, -2, -6); group.add(mesh); break;
+        case 'bazuca': { 
+          mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 6, 12), matMain); mesh.rotation.x = Math.PI / 2;
+          const back = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 1, 12), matDark); back.rotation.x = Math.PI/2; back.position.set(0, 0, 3); mesh.add(back);
+          const mid = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.5, 2), matDark); mid.position.set(0, -1, 0); mesh.add(mid);
+          mesh.position.set(1.5, -1.5, -4); group.add(mesh); 
+          break; 
+        }
       }
       return group;
     }
@@ -1217,7 +1222,7 @@
         else if (item.type === 'granada') mesh = new THREE.Sprite(new THREE.SpriteMaterial({ map: loadTextureSafe('granada.png') })), mesh.scale.set(4, 4, 1);
         else mesh = createWeaponModel(item.weaponId), mesh.scale.set(1.45, 1.45, 1.45), weaponDropIds.add(item.id);
         
-        mesh.position.set(item.x, item.y + 2, item.z); // Flutuar acima do chão
+        mesh.position.set(item.x, item.y + 2, item.z);
         scene.add(mesh); itemsOnGround.push({ ...item, mesh, picked: false });
       });
     }
@@ -1340,10 +1345,22 @@
         }, 50);
       }
 
-      const targets = getShootTargets();
-      
       const origin = camera.getWorldPosition(new THREE.Vector3()); 
       const defaultDir = new THREE.Vector3(); camera.getWorldDirection(defaultDir);
+
+      // NOVO: Integração da Bazuca que atira um projetil real
+      if (wpn.isProjectile) {
+        const rocket = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 5, 8), new THREE.MeshStandardMaterial({ color: 0x444444 }));
+        rocket.rotation.z = Math.PI / 2;
+        const pos = origin.clone().add(defaultDir.clone().multiplyScalar(6));
+        rocket.position.copy(pos);
+        rocket.userData = { velocity: defaultDir.clone().multiplyScalar(150), ownerId: localPlayerId, explodeAt: nowMs() + 2500, isRocket: true, dmg: wpn.damage, radius: 60 };
+        scene.add(rocket); thrownGrenades.push(rocket);
+        sendNet({ type:'rocketFire', id:localPlayerId, x:rocket.position.x, y:rocket.position.y, z:rocket.position.z, vx:rocket.userData.velocity.x, vy:rocket.userData.velocity.y, vz:rocket.userData.velocity.z, dmg: wpn.damage, radius: 60 });
+        return; 
+      }
+
+      const targets = getShootTargets();
 
       for (let i = 0; i < wpn.pellets; i++) {
         const raycaster = new THREE.Raycaster(); const dir = defaultDir.clone();
@@ -1367,8 +1384,7 @@
         if (wpn.id !== 'faca') { const startPoint = new THREE.Vector3(1.5, -1, -5).applyMatrix4(camera.matrixWorld); playShotVisual(startPoint, endPoint); }
       }
       
-      // OTIMIZAÇÃO: Transmite apenas 1 vez pro servidor que atirou em vez de 8!
-      if (gameMode !== 'treino') sendNet({ type: 'playerShoot', id: localPlayerId, x: origin.x, y: origin.y, z: origin.z, dx: defaultDir.x, dy: defaultDir.y, dz: defaultDir.z, range: wpn.range });
+      if (gameMode !== 'treino') sendNet({ type: 'playerShoot', id: localPlayerId, x: parseFloat(origin.x.toFixed(2)), y: parseFloat(origin.y.toFixed(2)), z: parseFloat(origin.z.toFixed(2)), dx: parseFloat(defaultDir.x.toFixed(2)), dy: parseFloat(defaultDir.y.toFixed(2)), dz: parseFloat(defaultDir.z.toFixed(2)), range: wpn.range });
     }
 
     function handleRemoteShot(data) {
@@ -1476,7 +1492,7 @@
         localEffects.joaoBuffUntil = nowMs() + 30000;
         localEffects.joaoOneShotKnifeUntil = nowMs() + 30000;
         localEffects.joaoHpExpireApplied = false;
-        playerMaxHP = 200; playerHP = Math.min(200, Math.max(playerHP + 100, 200)); playerArmor = Math.max(playerArmor, 150); updateStatusUI();
+        playerMaxHP = 400; playerHP = Math.min(400, Math.max(playerHP + 150, 400)); playerArmor = Math.max(playerArmor, 150); updateStatusUI();
         const aura = new THREE.Mesh(new THREE.CylinderGeometry(8, 8, 24, 16), new THREE.MeshBasicMaterial({ color: 0xffd700, transparent: true, opacity: 0.25 })); aura.position.copy(pos); scene.add(aura);
         const skillId = `joao_${Date.now()}`; otherPlayers[localPlayerId] = otherPlayers[localPlayerId] || { skillRefs: {} }; sendNet({ type:'skillUse', ownerId:localPlayerId, skill:'joao_aura', skillId });
         setTimeout(() => { removeAndDispose(aura); sendNet({ type:'skillRemove', ownerId:localPlayerId, skillId }); }, 10000); setAbilityCooldown(30);
@@ -1505,7 +1521,7 @@
             removeAndDispose(warn); const blast = new THREE.Mesh(new THREE.SphereGeometry(55, 24, 24), new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.85 })); blast.position.copy(targetPos); scene.add(blast); setTimeout(() => removeAndDispose(blast), 500);
             if (isZombieMode) zombies.forEach(z => { if (!z.isDead && z.mesh.position.distanceTo(targetPos) < 65) applyDamageToZombie(z, 1000); });
             if (getPlayerPosition().distanceTo(targetPos) < 65) applyDamageToLocalPlayer(150, localPlayerId, targetPos);
-            Object.entries(otherPlayers).forEach(([id, p]) => { if (!p.isDead && p.group.position.distanceTo(targetPos) < 65) { sendNet({ type:'hitPlayer', fromId:localPlayerId, targetId:id, damage:150, hitPos:{ x:targetPos.x, y:targetPos.y, z:targetPos.z } }); p.hp = Math.max(0, p.hp - 150); updateHealthBar(p.healthBar, p.hp, 100); } });
+            Object.entries(otherPlayers).forEach(([id, p]) => { if (!p.isDead && p.group.position.distanceTo(targetPos) < 65) { sendNet({ type:'hitPlayer', fromId:localPlayerId, targetId:id, damage:150, hitPos:{ x:targetPos.x, y:targetPos.y, z:targetPos.z } }); p.hp = Math.max(0, p.hp - 150); updateHealthBar(p.healthBar, p.hp, 250); } });
           }, 2000);
           setAbilityCooldown(20);
         }
@@ -1518,26 +1534,26 @@
       rocket.rotation.z = Math.PI / 2;
       const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
       rocket.position.copy(getPlayerPosition()).add(dir.clone().multiplyScalar(8)).add(new THREE.Vector3(0, 7, 0));
-      rocket.userData = { velocity: dir.clone().multiplyScalar(120), ownerId: localPlayerId, explodeAt: nowMs() + 1500, isRocket: true };
+      rocket.userData = { velocity: dir.clone().multiplyScalar(120), ownerId: localPlayerId, explodeAt: nowMs() + 1500, isRocket: true, dmg: 400, radius: 70 };
       scene.add(rocket); thrownGrenades.push(rocket);
-      sendNet({ type:'rocketFire', id:localPlayerId, x:rocket.position.x, y:rocket.position.y, z:rocket.position.z, vx:rocket.userData.velocity.x, vy:rocket.userData.velocity.y, vz:rocket.userData.velocity.z });
+      sendNet({ type:'rocketFire', id:localPlayerId, x:rocket.position.x, y:rocket.position.y, z:rocket.position.z, vx:rocket.userData.velocity.x, vy:rocket.userData.velocity.y, vz:rocket.userData.velocity.z, dmg: 400, radius: 70 });
     }
 
     function spawnRemoteRocket(data) {
       if (data.id === localPlayerId) return;
       const rocket = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 7, 8), new THREE.MeshStandardMaterial({ color: 0x666666 }));
-      rocket.rotation.z = Math.PI / 2; rocket.position.set(data.x, data.y, data.z); rocket.userData = { velocity: new THREE.Vector3(data.vx, data.vy, data.vz), ownerId: data.id, explodeAt: nowMs() + 1500, isRocket: true };
+      rocket.rotation.z = Math.PI / 2; rocket.position.set(data.x, data.y, data.z); 
+      rocket.userData = { velocity: new THREE.Vector3(data.vx, data.vy, data.vz), ownerId: data.id, explodeAt: nowMs() + 1500, isRocket: true, dmg: data.dmg || 240, radius: data.radius || 70 };
       scene.add(rocket); thrownGrenades.push(rocket);
     }
 
-    // --- NOVA INTELIGENCIA & SINCRONIZAÇÃO DE ZUMBIS ---
     function startZombieWave() {
       zombiesToSpawn = currentWave * 5; safeSetText('waveNumber', currentWave); safeSetText('zombieCount', zombiesToSpawn);
       const interval = setInterval(() => { if (zombiesToSpawn <= 0) { clearInterval(interval); return; } spawnZombieHost(); zombiesToSpawn--; }, 1800);
     }
 
     function spawnZombieHost() {
-      const type = Math.floor(Math.random() * 6) + 1; // Agora vai ate 6!
+      const type = Math.floor(Math.random() * 6) + 1; 
       
       let hp, speed, scale, color, dmg;
       if (type === 1) { hp = 60; speed = 22; scale = 1; color = 0x2ecc71; dmg = 5; } // Andarilho
@@ -1553,11 +1569,10 @@
          id: `z${zombieIdCounter++}`, type, hp, maxHp: hp, speed, damage: dmg, scale, color, x: spawn.x, y: spawn.y, z: spawn.z
       };
       
-      createZombieLocal(zData); // Host cria
-      sendNet({ type: 'zombieSpawn', z: zData }); // Avisa os clientes pra criarem
+      createZombieLocal(zData);
+      sendNet({ type: 'zombieSpawn', z: zData });
     }
 
-    // Função universal de criação
     function createZombieLocal(zd) {
       const tex = loadTextureSafe(`zumbi${zd.type <= 3 ? (zd.type === 1 ? '' : zd.type) : '1'}.png`);
       const group = new THREE.Group(); 
@@ -1570,11 +1585,10 @@
       const hpBar = makeHealthBar(8.8, 15); group.add(hpBar); group.scale.set(zd.scale, zd.scale, zd.scale);
       
       group.position.set(zd.x, zd.y, zd.z); scene.add(group);
-      const z = { id: zd.id, mesh: group, healthBar: hpBar, hp: zd.hp, maxHp: zd.maxHp, speed: zd.speed, damage: zd.damage, type: zd.type, isDead: false, lastAttack: 0 };
+      const z = { id: zd.id, mesh: group, healthBar: hpBar, hp: zd.hp, maxHp: zd.maxHp, speed: zd.speed, damage: zd.damage, type: zd.type, isDead: false, lastAttack: 0, lastAITick: 0, targetPos: null };
       group.userData.isZombie = true; group.userData.zombieRef = z; zombies.push(z); updateHealthBar(hpBar, zd.hp, zd.hp);
     }
 
-    // Busca o player vivo mais perto
     function getClosestPlayer(zPos) {
       let minDist = Infinity;
       let targetPos = null;
@@ -1606,7 +1620,6 @@
 
     function setupInputs() {
       document.addEventListener('keydown', (e) => {
-        // --- CHAT SYSTEM ---
         if (e.code === 'Enter' && !isSpectating && !gameOver && controls) {
           const input = document.getElementById('chatInput');
           if (document.activeElement === input) {
@@ -1627,9 +1640,7 @@
           return;
         }
 
-        // Se estiver no chat, bloqueia andar/atirar
         if (document.activeElement === document.getElementById('chatInput')) return;
-
         if (isSpectating) { if (e.code === 'KeyQ') prevSpectateTarget(); if (e.code === 'KeyE') nextSpectateTarget(); return; }
         if (!controls || !controls.isLocked || gameOver) return;
         switch (e.code) {
@@ -1696,13 +1707,26 @@
       netInterval = setInterval(() => {
         if (!controls || gameOver) return;
         const pos = getPlayerPosition();
-        sendNet({ type: 'playerUpdate', id: localPlayerId, nickname, team: myTeam, charId: selectedCharId, x: pos.x, y: pos.y, z: pos.z, rot: camera.rotation.y, hp: playerHP, isDead: gameOver });
+        // Otimização: Arredondar floats para salvar banda severamente
+        sendNet({ 
+          type: 'playerUpdate', id: localPlayerId, nickname, team: myTeam, charId: selectedCharId, 
+          x: parseFloat(pos.x.toFixed(2)), y: parseFloat(pos.y.toFixed(2)), z: parseFloat(pos.z.toFixed(2)), 
+          rot: parseFloat(camera.rotation.y.toFixed(2)), hp: playerHP, isDead: gameOver 
+        });
         
-        // Host sincroniza posições dos zumbis para ninguém ver bicho voando/invisível
         if (isHost && isZombieMode) {
            const zData = zombies.filter(z => !z.isDead).map(z => {
               const dir = new THREE.Vector3(); z.mesh.getWorldDirection(dir);
-              return { i: z.id, x: z.mesh.position.x, y: z.mesh.position.y, z: z.mesh.position.z, h: z.hp, tx: z.mesh.position.x + dir.x, tz: z.mesh.position.z + dir.z }
+              // Float para 1 casa decimal economiza quase 50% de dados
+              return { 
+                i: z.id, 
+                x: parseFloat(z.mesh.position.x.toFixed(1)), 
+                y: parseFloat(z.mesh.position.y.toFixed(1)), 
+                z: parseFloat(z.mesh.position.z.toFixed(1)), 
+                h: z.hp, 
+                tx: parseFloat((z.mesh.position.x + dir.x).toFixed(1)), 
+                tz: parseFloat((z.mesh.position.z + dir.z).toFixed(1)) 
+              }
            });
            if(zData.length > 0) sendNet({ type: 'zombiesSync', zs: zData });
         }
@@ -1765,7 +1789,7 @@
       }
 
       if (selectedCharId === 'joão' && localEffects.joaoBuffUntil > 0 && now > localEffects.joaoBuffUntil && !localEffects.joaoHpExpireApplied) {
-        localEffects.joaoHpExpireApplied = true; playerMaxHP = 100; playerHP = Math.min(playerHP, 100); playerArmor = Math.min(playerArmor, 75); updateStatusUI();
+        localEffects.joaoHpExpireApplied = true; playerMaxHP = 250; playerHP = Math.min(playerHP, 250); playerArmor = Math.min(playerArmor, 75); updateStatusUI();
       }
 
       velocity.x = 0; velocity.z = 0;
@@ -1808,13 +1832,13 @@
         if (!g.userData.isRocket) g.userData.velocity.y -= 26 * delta;
         if (!g.userData.isRocket && g.position.y <= 3) { g.position.y = 3; g.userData.velocity.x *= 0.55; g.userData.velocity.z *= 0.55; g.userData.velocity.y *= -0.15; }
         if (now > (g.userData.explodeTime || g.userData.explodeAt)) {
-          const radius = g.userData.isRocket ? 70 : 40;
-          const damage = g.userData.isRocket ? 240 : 100;
+          const radius = g.userData.radius || (g.userData.isRocket ? 70 : 40);
+          const damage = g.userData.dmg || (g.userData.isRocket ? 240 : 100);
           const color = g.userData.isRocket ? 0xffaa00 : 0xff4655;
           const expl = new THREE.Mesh(new THREE.SphereGeometry(g.userData.isRocket ? 55 : 35, 16, 16), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.82 }));
           expl.position.copy(g.position); scene.add(expl); setTimeout(() => removeAndDispose(expl), 320);
           if (isZombieMode) zombies.forEach(z => { if (!z.isDead && z.mesh.position.distanceTo(g.position) < radius) applyDamageToZombie(z, g.userData.isRocket ? 400 : 150); });
-          Object.entries(otherPlayers).forEach(([id, p]) => { if (!p.isDead && p.group.position.distanceTo(g.position) < radius && g.userData.ownerId === localPlayerId) { sendNet({ type:'hitPlayer', fromId:localPlayerId, targetId:id, damage, hitPos:{ x:g.position.x, y:g.position.y, z:g.position.z } }); p.hp = Math.max(0, p.hp - damage); updateHealthBar(p.healthBar, p.hp, 100); pulseDamageMesh(p.group.position.clone().add(new THREE.Vector3(0, 9, 0))); } });
+          Object.entries(otherPlayers).forEach(([id, p]) => { if (!p.isDead && p.group.position.distanceTo(g.position) < radius && g.userData.ownerId === localPlayerId) { sendNet({ type:'hitPlayer', fromId:localPlayerId, targetId:id, damage, hitPos:{ x:g.position.x, y:g.position.y, z:g.position.z } }); p.hp = Math.max(0, p.hp - damage); updateHealthBar(p.healthBar, p.hp, 250); pulseDamageMesh(p.group.position.clone().add(new THREE.Vector3(0, 9, 0))); } });
           if (g.userData.ownerId !== localPlayerId && getPlayerPosition().distanceTo(g.position) < radius && !gameOver) applyDamageToLocalPlayer(damage, g.userData.ownerId, g.position);
           removeAndDispose(g); thrownGrenades.splice(i, 1);
         }
@@ -1826,7 +1850,6 @@
         if (item.type === 'weapon') item.mesh.rotation.y += 0.02; 
         item.mesh.position.y = item.y + 1.5 + Math.sin(now / 200) * 0.5;
         
-        // FIX: Removemos a trava isHost daqui. QUALQUER UM PODE PEGAR AGORA!
         if (distance2D(getPlayerPosition(), item.mesh.position) < 16) {
           if (item.type === 'ammo') { playerLoadout.primary.reserveAmmo = Math.min(playerLoadout.primary.maxReserve, playerLoadout.primary.reserveAmmo + item.amount); if (playerLoadout.currentSlot === 1) updateAmmoUI(); }
           else if (item.type === 'cura') { playerHP = Math.min(playerMaxHP, playerHP + item.amount); updateStatusUI(); }
@@ -1842,33 +1865,37 @@
             if (playerLoadout.currentSlot === 1) switchSlot(1);
           }
           const itemId = item.id; removeAndDispose(item.mesh); itemsOnGround.splice(i, 1); 
-          if (gameMode !== 'treino') sendNet({ type:'pickupItem', itemId }); // Fala pra galera remover tb!
+          if (gameMode !== 'treino') sendNet({ type:'pickupItem', itemId });
         }
       }
 
-      // IA DO ZUMBI
+      // IA DO ZUMBI TOTALMENTE OTIMIZADA PARA O HOST
       if (isZombieMode && isHost) {
         let alive = 0;
         zombies.forEach(z => {
           if (z.isDead) return; alive++;
           
-          const targetPos = getClosestPlayer(z.mesh.position);
-          if(!targetPos) return;
-
-          const dir = new THREE.Vector3().subVectors(targetPos, z.mesh.position); dir.y = 0; dir.normalize(); 
-          z.mesh.position.add(dir.multiplyScalar(z.speed * delta)); 
-          z.mesh.lookAt(targetPos.x, z.mesh.position.y, targetPos.z);
+          // Throttling: Calcula o inimigo mais próximo só a cada 150ms ao invés de todo frame. (Salva absurdamente a CPU)
+          if (now - (z.lastAITick || 0) > 150) {
+            z.lastAITick = now;
+            z.targetPos = getClosestPlayer(z.mesh.position);
+          }
           
-          if (z.mesh.position.distanceTo(targetPos) < (15 * z.mesh.scale.x) && now - z.lastAttack > 1000) { 
+          if(!z.targetPos) return;
+
+          const dir = new THREE.Vector3().subVectors(z.targetPos, z.mesh.position); dir.y = 0; dir.normalize(); 
+          z.mesh.position.add(dir.multiplyScalar(z.speed * delta)); 
+          z.mesh.lookAt(z.targetPos.x, z.mesh.position.y, z.targetPos.z);
+          
+          if (z.mesh.position.distanceTo(z.targetPos) < (15 * z.mesh.scale.x) && now - z.lastAttack > 1000) { 
              z.lastAttack = now;
-             if (targetPos.equals(getPlayerPosition())) {
+             if (z.targetPos.equals(getPlayerPosition())) {
                  applyDamageToLocalPlayer(z.damage, z.id, z.mesh.position);
              } else {
-                 // Descobre quem ele bateu e manda aplicar dano pela rede
                  Object.values(otherPlayers).forEach(p => {
-                    if (p.group.position.equals(targetPos)) {
+                    if (p.group.position.equals(z.targetPos)) {
                         sendNet({ type: 'hitPlayer', fromId: z.id, targetId: p.id, damage: z.damage });
-                        p.hp -= z.damage; updateHealthBar(p.healthBar, p.hp, 100);
+                        p.hp -= z.damage; updateHealthBar(p.healthBar, p.hp, 250);
                     }
                  });
              }
