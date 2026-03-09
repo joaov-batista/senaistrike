@@ -778,7 +778,6 @@
 
     function initMultiplayer() {
       isHost = gameMode.includes('host');
-      // roster local é registrado após o peer abrir
 
       if (isHost) {
         roomCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -801,17 +800,22 @@
           localPlayerId = id;
           safeSetText('connStatus', 'Conectando...');
           hostConn = peer.connect(ROOM_PREFIX + roomCode, { reliable: true });
-          hostConn.on('open', () => setupPeerConnection(hostConn));
+          setupPeerConnection(hostConn);
         });
         peer.on('error', () => { safeSetText('connStatus', 'Erro'); document.getElementById('connStatus').style.color = '#ff4655'; });
       }
     }
 
+    // CORREÇÃO: Garante que o evento open funcione corretamente
     function setupPeerConnection(conn) {
-      conn.on('open', () => {
+      const onOpen = () => {
         safeSetText('connStatus', 'CONECTADO!'); document.getElementById('connStatus').style.color = '#2ecc71';
         sendNet({ type: 'hello', id: localPlayerId, nickname, charId: selectedCharId, team: myTeam, host: isHost }, conn);
-      });
+      };
+
+      if (conn.open) onOpen();
+      else conn.on('open', onOpen);
+
       conn.on('data', (data) => handleNetData(data, conn));
       conn.on('close', () => {
         cleanupDisconnectedPlayer(conn.peer);
@@ -892,16 +896,69 @@
       scene?.remove(p.group); delete otherPlayers[id];
     }
 
+    // CORREÇÃO 3: Função de criar o boneco em 3D pra os outros visualizarem
+    function buildPlayerMesh(p) {
+      if (typeof scene === 'undefined' || !scene) return;
+      
+      const charData = charById(p.charId) || CHARACTERS[0];
+      p.group = new THREE.Group();
+      
+      const bodyGeo = new THREE.BoxGeometry(4, 10, 4);
+      const bodyColor = isTeamMode ? (p.team === 'alpha' ? 0x3498db : 0xe74c3c) : 0xcccccc;
+      const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor });
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      body.position.y = 5;
+
+      const headGeo = new THREE.BoxGeometry(4, 4, 4);
+      const headMat = new THREE.MeshStandardMaterial({ map: loadTextureSafe(charData.img), color: 0xffffff });
+      const head = new THREE.Mesh(headGeo, headMat);
+      head.position.y = 12;
+
+      p.group.add(body);
+      p.group.add(head);
+
+      p.healthBar = makeHealthBar(10, 16);
+      p.group.add(p.healthBar);
+
+      scene.add(p.group);
+    }
+
+    // CORREÇÃO 1: Conserto do erro de sintaxe e gestão do modelo 3d no jogo e lobby
     function ensureOtherPlayer(data) {
       if (!data.id || data.id === localPlayerId) return;
-      if (otherPlayers[data.id]) return;
-      const charData = charById
+
+      if (otherPlayers[data.id]) {
+         if (typeof scene !== 'undefined' && scene && (!otherPlayers[data.id].group || otherPlayers[data.id].group.children.length === 0)) {
+             buildPlayerMesh(otherPlayers[data.id]);
+         }
+         return;
+      }
+
+      const p = {
+        id: data.id,
+        nickname: data.nickname || 'Jogador',
+        team: data.team,
+        charId: data.charId,
+        group: new THREE.Group(),
+        healthBar: null,
+        hp: 100,
+        isDead: false,
+        invisibleUntil: 0,
+        skillRefs: {}
+      };
+
+      otherPlayers[data.id] = p;
+
+      if (typeof scene !== 'undefined' && scene) {
+        buildPlayerMesh(p);
+      }
     }
+
     function updateOtherPlayer(data) {
       if (!data.id || data.id === localPlayerId) return;
       ensureOtherPlayer(data);
       const p = otherPlayers[data.id];
-      if (!p) return;
+      if (!p || !p.group) return;
       p.nickname = data.nickname ?? p.nickname; p.team = data.team ?? p.team; p.hp = typeof data.hp === 'number' ? data.hp : p.hp; p.isDead = !!data.isDead;
       p.group.position.set(data.x, data.y - 10, data.z); p.group.rotation.y = data.rot; p.group.visible = nowMs() > (p.invisibleUntil || 0);
       updateHealthBar(p.healthBar, p.hp, 100);
@@ -923,6 +980,13 @@
       document.getElementById('weaponPanel').style.display = 'block';
       if (isZombieMode) { document.getElementById('waveHUD').style.display = 'block'; document.getElementById('flashlightHint').style.display = 'block'; }
       initGame();
+
+      // Força a renderização dos jogadores que entraram antes do jogo iniciar
+      Object.values(otherPlayers).forEach(p => {
+          if (typeof scene !== 'undefined' && scene && (!p.group || p.group.children.length === 0)) {
+              buildPlayerMesh(p);
+          }
+      });
     }
 
     function initGame() {
